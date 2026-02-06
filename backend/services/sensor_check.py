@@ -8,9 +8,66 @@ import os
 import re
 from typing import Dict, List, Optional
 
+try:
+    import paramiko
+    HAS_PARAMIKO = True
+except ImportError:
+    HAS_PARAMIKO = False
+
+from config import config
+
 
 class SensorCheckService:
     """센서 연결 확인 서비스"""
+    
+    def __init__(self):
+        self._ssh_client = None
+        self._pc2_config = config.pcs.get("pc2") if hasattr(config, 'pcs') else None
+    
+    def _get_ssh_client(self):
+        """PC2 SSH 클라이언트 생성 또는 재사용"""
+        if not HAS_PARAMIKO:
+            raise ImportError("paramiko is required for SSH")
+        
+        if not self._pc2_config:
+            raise ValueError("PC2 config not found")
+        
+        if self._ssh_client:
+            try:
+                if self._ssh_client.get_transport() and self._ssh_client.get_transport().is_active():
+                    return self._ssh_client
+            except:
+                pass
+        
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        pc = self._pc2_config
+        if pc.ssh_key_path:
+            client.connect(
+                hostname=pc.ip,
+                port=pc.port,
+                username=pc.username,
+                key_filename=pc.ssh_key_path,
+                timeout=5,
+            )
+        else:
+            client.connect(
+                hostname=pc.ip,
+                port=pc.port,
+                username=pc.username,
+                password=pc.password,
+                timeout=5,
+            )
+        
+        self._ssh_client = client
+        return client
+    
+    def _run_remote_command(self, command: str, timeout: int = 10) -> tuple:
+        """PC2에서 명령 실행"""
+        client = self._get_ssh_client()
+        stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        return stdout.read().decode().strip(), stderr.read().decode().strip()
     
     async def ping_host(self, ip: str, timeout: float = 1.0) -> Dict:
         """
@@ -155,7 +212,7 @@ class SensorCheckService:
     
     async def get_audio_devices(self) -> Dict[str, bool]:
         """
-        오디오 장치 연결 상태 확인
+        오디오 장치 연결 상태 확인 (PC2에서 SSH로 실행)
         aplay -l (스피커), arecord -l (마이크)
         
         Returns:
@@ -164,33 +221,21 @@ class SensorCheckService:
         def _check_audio_sync():
             result = {"speaker": False, "microphone": False}
             
-            # 스피커 확인 (aplay -l)
             try:
-                output = subprocess.run(
-                    ["aplay", "-l"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                # "card" 문자열이 있으면 스피커 장치 존재
-                if "card" in output.stdout.lower():
+                # PC2에서 aplay -l 실행
+                stdout, stderr = self._run_remote_command("aplay -l")
+                if "card" in stdout.lower():
                     result["speaker"] = True
-            except Exception:
-                pass
+            except Exception as e:
+                result["speaker_error"] = str(e)
             
-            # 마이크 확인 (arecord -l)
             try:
-                output = subprocess.run(
-                    ["arecord", "-l"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                # "card" 문자열이 있으면 마이크 장치 존재
-                if "card" in output.stdout.lower():
+                # PC2에서 arecord -l 실행
+                stdout, stderr = self._run_remote_command("arecord -l")
+                if "card" in stdout.lower():
                     result["microphone"] = True
-            except Exception:
-                pass
+            except Exception as e:
+                result["microphone_error"] = str(e)
             
             return result
         
@@ -199,7 +244,7 @@ class SensorCheckService:
     
     async def list_audio_devices(self) -> Dict[str, list]:
         """
-        사용 가능한 오디오 장치 목록 조회
+        사용 가능한 오디오 장치 목록 조회 (PC2에서 SSH로 실행)
         
         Returns:
             {"speakers": [...], "microphones": [...]}
@@ -207,62 +252,36 @@ class SensorCheckService:
         def _list_sync():
             result = {"speakers": [], "microphones": []}
             
-            # 스피커 목록 (aplay -l)
+            def parse_audio_output(output_str, device_list):
+                for line in output_str.split('\n'):
+                    if line.startswith('card '):
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            card_info = parts[0].strip()
+                            card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
+                            name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
+                            device = "0"
+                            if 'device' in line:
+                                device_part = line.split('device')[1]
+                                device = device_part.split(':')[0].strip()
+                            device_list.append({
+                                "id": f"hw:{card_num},{device}",
+                                "name": name,
+                                "card": int(card_num),
+                                "device": int(device),
+                            })
+            
+            # PC2에서 aplay -l 실행
             try:
-                output = subprocess.run(
-                    ["aplay", "-l"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if output.returncode == 0:
-                    for line in output.stdout.split('\n'):
-                        if line.startswith('card '):
-                            # card 0: tegra-hda [tegra-hda], device 3: HDMI 0 [HDMI 0]
-                            parts = line.split(':')
-                            if len(parts) >= 2:
-                                card_info = parts[0].strip()  # "card 0"
-                                card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
-                                name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
-                                device = "0"
-                                if 'device' in line:
-                                    device_part = line.split('device')[1]
-                                    device = device_part.split(':')[0].strip()
-                                result["speakers"].append({
-                                    "id": f"hw:{card_num},{device}",
-                                    "name": name,
-                                    "card": int(card_num),
-                                    "device": int(device),
-                                })
+                stdout, stderr = self._run_remote_command("aplay -l")
+                parse_audio_output(stdout, result["speakers"])
             except Exception as e:
                 result["speaker_error"] = str(e)
             
-            # 마이크 목록 (arecord -l)
+            # PC2에서 arecord -l 실행
             try:
-                output = subprocess.run(
-                    ["arecord", "-l"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if output.returncode == 0:
-                    for line in output.stdout.split('\n'):
-                        if line.startswith('card '):
-                            parts = line.split(':')
-                            if len(parts) >= 2:
-                                card_info = parts[0].strip()
-                                card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
-                                name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
-                                device = "0"
-                                if 'device' in line:
-                                    device_part = line.split('device')[1]
-                                    device = device_part.split(':')[0].strip()
-                                result["microphones"].append({
-                                    "id": f"hw:{card_num},{device}",
-                                    "name": name,
-                                    "card": int(card_num),
-                                    "device": int(device),
-                                })
+                stdout, stderr = self._run_remote_command("arecord -l")
+                parse_audio_output(stdout, result["microphones"])
             except Exception as e:
                 result["microphone_error"] = str(e)
             
@@ -273,23 +292,17 @@ class SensorCheckService:
     
     async def test_speaker(self, device_id: str = "default") -> Dict:
         """
-        스피커 테스트 (짧은 비프음 재생)
+        스피커 테스트 (짧은 비프음 재생) - PC2에서 SSH로 실행
         
         Args:
             device_id: ALSA 장치 ID (예: "hw:0,0" 또는 "default")
         """
         def _test_sync():
             try:
-                # speaker-test로 짧은 테스트 (1초)
-                result = subprocess.run(
-                    ["speaker-test", "-D", device_id, "-c", "2", "-t", "sine", "-f", "440", "-l", "1"],
-                    capture_output=True,
-                    text=True,
-                    timeout=3,
-                )
+                # PC2에서 speaker-test 실행 (timeout 3초)
+                cmd = f"timeout 3 speaker-test -D {device_id} -c 2 -t sine -f 440 -l 1 2>&1 || true"
+                stdout, stderr = self._run_remote_command(cmd, timeout=5)
                 return {"success": True, "device": device_id, "message": "Test tone played"}
-            except subprocess.TimeoutExpired:
-                return {"success": True, "device": device_id, "message": "Test completed"}
             except Exception as e:
                 return {"success": False, "device": device_id, "error": str(e)}
         
@@ -298,7 +311,7 @@ class SensorCheckService:
     
     async def test_microphone(self, device_id: str = "default", duration: float = 2.0) -> Dict:
         """
-        마이크 테스트 (녹음 후 레벨 확인)
+        마이크 테스트 (녹음 후 레벨 확인) - PC2에서 SSH로 실행
         
         Args:
             device_id: ALSA 장치 ID
@@ -306,24 +319,13 @@ class SensorCheckService:
         """
         def _test_sync():
             try:
-                # arecord로 짧은 녹음 후 삭제
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as f:
-                    result = subprocess.run(
-                        ["arecord", "-D", device_id, "-d", str(int(duration)), "-f", "cd", f.name],
-                        capture_output=True,
-                        text=True,
-                        timeout=duration + 2,
-                    )
-                    if result.returncode == 0:
-                        # 파일 크기로 녹음 성공 여부 확인
-                        import os
-                        size = os.path.getsize(f.name)
-                        return {"success": True, "device": device_id, "recorded_bytes": size}
-                    else:
-                        return {"success": False, "device": device_id, "error": result.stderr}
-            except subprocess.TimeoutExpired:
-                return {"success": True, "device": device_id, "message": "Recording completed"}
+                # PC2에서 arecord로 녹음 테스트
+                cmd = f"arecord -D {device_id} -d {int(duration)} -f cd /tmp/mic_test.wav 2>&1 && ls -la /tmp/mic_test.wav && rm -f /tmp/mic_test.wav"
+                stdout, stderr = self._run_remote_command(cmd, timeout=int(duration) + 5)
+                if "mic_test.wav" in stdout:
+                    return {"success": True, "device": device_id, "message": "Recording completed"}
+                else:
+                    return {"success": False, "device": device_id, "error": stderr or "Recording failed"}
             except Exception as e:
                 return {"success": False, "device": device_id, "error": str(e)}
         
@@ -332,7 +334,7 @@ class SensorCheckService:
     
     async def get_volume(self) -> Dict[str, int]:
         """
-        현재 볼륨 조회
+        현재 볼륨 조회 - PC2에서 SSH로 실행
         
         Returns:
             {"speaker": 0-100, "microphone": 0-100}
@@ -340,37 +342,25 @@ class SensorCheckService:
         def _get_sync():
             result = {"speaker": 50, "microphone": 50}
             
-            # 스피커 볼륨 (Master 또는 PCM)
+            # PC2에서 스피커 볼륨 조회 (Master 또는 PCM)
             for control in ["Master", "PCM"]:
                 try:
-                    output = subprocess.run(
-                        ["amixer", "get", control],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    if output.returncode == 0:
-                        match = re.search(r'\[(\d+)%\]', output.stdout)
-                        if match:
-                            result["speaker"] = int(match.group(1))
-                            break
+                    stdout, stderr = self._run_remote_command(f"amixer get {control}")
+                    match = re.search(r'\[(\d+)%\]', stdout)
+                    if match:
+                        result["speaker"] = int(match.group(1))
+                        break
                 except:
                     pass
             
-            # 마이크 볼륨 (Capture 또는 Mic)
+            # PC2에서 마이크 볼륨 조회 (Capture 또는 Mic)
             for control in ["Capture", "Mic"]:
                 try:
-                    output = subprocess.run(
-                        ["amixer", "get", control],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    if output.returncode == 0:
-                        match = re.search(r'\[(\d+)%\]', output.stdout)
-                        if match:
-                            result["microphone"] = int(match.group(1))
-                            break
+                    stdout, stderr = self._run_remote_command(f"amixer get {control}")
+                    match = re.search(r'\[(\d+)%\]', stdout)
+                    if match:
+                        result["microphone"] = int(match.group(1))
+                        break
                 except:
                     pass
             
@@ -381,7 +371,7 @@ class SensorCheckService:
     
     async def set_volume(self, device_type: str, volume: int) -> Dict:
         """
-        볼륨 설정
+        볼륨 설정 - PC2에서 SSH로 실행
         
         Args:
             device_type: "speaker" 또는 "microphone"
@@ -397,13 +387,8 @@ class SensorCheckService:
             
             for control in controls:
                 try:
-                    result = subprocess.run(
-                        ["amixer", "set", control, f"{volume_clamped}%"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    if result.returncode == 0:
+                    stdout, stderr = self._run_remote_command(f"amixer set {control} {volume_clamped}%")
+                    if "%" in stdout:
                         return {"success": True, "device": device_type, "volume": volume_clamped}
                 except:
                     continue
@@ -412,4 +397,3 @@ class SensorCheckService:
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _set_sync)
-
