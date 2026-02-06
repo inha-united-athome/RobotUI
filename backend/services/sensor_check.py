@@ -329,4 +329,87 @@ class SensorCheckService:
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _test_sync)
+    
+    async def get_volume(self) -> Dict[str, int]:
+        """
+        현재 볼륨 조회
+        
+        Returns:
+            {"speaker": 0-100, "microphone": 0-100}
+        """
+        def _get_sync():
+            result = {"speaker": 50, "microphone": 50}
+            
+            # 스피커 볼륨 (Master 또는 PCM)
+            for control in ["Master", "PCM"]:
+                try:
+                    output = subprocess.run(
+                        ["amixer", "get", control],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if output.returncode == 0:
+                        match = re.search(r'\[(\d+)%\]', output.stdout)
+                        if match:
+                            result["speaker"] = int(match.group(1))
+                            break
+                except:
+                    pass
+            
+            # 마이크 볼륨 (Capture 또는 Mic)
+            for control in ["Capture", "Mic"]:
+                try:
+                    output = subprocess.run(
+                        ["amixer", "get", control],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if output.returncode == 0:
+                        match = re.search(r'\[(\d+)%\]', output.stdout)
+                        if match:
+                            result["microphone"] = int(match.group(1))
+                            break
+                except:
+                    pass
+            
+            return result
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+    
+    async def set_volume(self, device_type: str, volume: int) -> Dict:
+        """
+        볼륨 설정
+        
+        Args:
+            device_type: "speaker" 또는 "microphone"
+            volume: 0-100
+        """
+        def _set_sync():
+            volume_clamped = max(0, min(100, volume))
+            
+            if device_type == "speaker":
+                controls = ["Master", "PCM"]
+            else:
+                controls = ["Capture", "Mic"]
+            
+            for control in controls:
+                try:
+                    result = subprocess.run(
+                        ["amixer", "set", control, f"{volume_clamped}%"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        return {"success": True, "device": device_type, "volume": volume_clamped}
+                except:
+                    continue
+            
+            return {"success": False, "device": device_type, "error": "No control found"}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _set_sync)
 
