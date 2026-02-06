@@ -257,6 +257,10 @@ class SensorCheckService:
                     if line.startswith('card '):
                         parts = line.split(':')
                         if len(parts) >= 2:
+                            # 필터링: ADMAIF(Jetson 내부) 및 HDMI 제외
+                            if "ADMAIF" in line or "HDMI" in line:
+                                continue
+                                
                             card_info = parts[0].strip()
                             card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
                             name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
@@ -264,9 +268,18 @@ class SensorCheckService:
                             if 'device' in line:
                                 device_part = line.split('device')[1]
                                 device = device_part.split(':')[0].strip()
+                            
+                            # 친화적인 이름 생성
+                            friendly_name = name
+                            if "USB" in name:
+                                friendly_name = f"🔊 USB Audio ({name})"
+                            elif "ReSpeaker" in line:
+                                friendly_name = f"🎤 ReSpeaker ({name})"
+                                
                             device_list.append({
                                 "id": f"hw:{card_num},{device}",
-                                "name": name,
+                                "name": friendly_name,
+                                "original_name": name,
                                 "card": int(card_num),
                                 "device": int(device),
                             })
