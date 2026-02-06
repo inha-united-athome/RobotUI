@@ -162,3 +162,25 @@ async def get_sensor_config():
             for s in config.sensors
         ]
     }
+
+
+@router.get("/audio/list")
+async def list_audio_devices():
+    """사용 가능한 오디오 장치 목록"""
+    devices = await sensor_service.list_audio_devices()
+    return devices
+
+
+@router.post("/audio/test/speaker")
+async def test_speaker(device_id: str = "default"):
+    """스피커 테스트 (비프음 재생)"""
+    result = await sensor_service.test_speaker(device_id)
+    return result
+
+
+@router.post("/audio/test/microphone")
+async def test_microphone(device_id: str = "default"):
+    """마이크 테스트 (녹음 테스트)"""
+    result = await sensor_service.test_microphone(device_id)
+    return result
+

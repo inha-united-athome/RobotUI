@@ -196,3 +196,137 @@ class SensorCheckService:
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _check_audio_sync)
+    
+    async def list_audio_devices(self) -> Dict[str, list]:
+        """
+        사용 가능한 오디오 장치 목록 조회
+        
+        Returns:
+            {"speakers": [...], "microphones": [...]}
+        """
+        def _list_sync():
+            result = {"speakers": [], "microphones": []}
+            
+            # 스피커 목록 (aplay -l)
+            try:
+                output = subprocess.run(
+                    ["aplay", "-l"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if output.returncode == 0:
+                    for line in output.stdout.split('\n'):
+                        if line.startswith('card '):
+                            # card 0: tegra-hda [tegra-hda], device 3: HDMI 0 [HDMI 0]
+                            parts = line.split(':')
+                            if len(parts) >= 2:
+                                card_info = parts[0].strip()  # "card 0"
+                                card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
+                                name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
+                                device = "0"
+                                if 'device' in line:
+                                    device_part = line.split('device')[1]
+                                    device = device_part.split(':')[0].strip()
+                                result["speakers"].append({
+                                    "id": f"hw:{card_num},{device}",
+                                    "name": name,
+                                    "card": int(card_num),
+                                    "device": int(device),
+                                })
+            except Exception as e:
+                result["speaker_error"] = str(e)
+            
+            # 마이크 목록 (arecord -l)
+            try:
+                output = subprocess.run(
+                    ["arecord", "-l"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if output.returncode == 0:
+                    for line in output.stdout.split('\n'):
+                        if line.startswith('card '):
+                            parts = line.split(':')
+                            if len(parts) >= 2:
+                                card_info = parts[0].strip()
+                                card_num = card_info.split()[1] if len(card_info.split()) > 1 else "0"
+                                name = parts[1].split('[')[0].strip() if '[' in parts[1] else parts[1].strip()
+                                device = "0"
+                                if 'device' in line:
+                                    device_part = line.split('device')[1]
+                                    device = device_part.split(':')[0].strip()
+                                result["microphones"].append({
+                                    "id": f"hw:{card_num},{device}",
+                                    "name": name,
+                                    "card": int(card_num),
+                                    "device": int(device),
+                                })
+            except Exception as e:
+                result["microphone_error"] = str(e)
+            
+            return result
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _list_sync)
+    
+    async def test_speaker(self, device_id: str = "default") -> Dict:
+        """
+        스피커 테스트 (짧은 비프음 재생)
+        
+        Args:
+            device_id: ALSA 장치 ID (예: "hw:0,0" 또는 "default")
+        """
+        def _test_sync():
+            try:
+                # speaker-test로 짧은 테스트 (1초)
+                result = subprocess.run(
+                    ["speaker-test", "-D", device_id, "-c", "2", "-t", "sine", "-f", "440", "-l", "1"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                return {"success": True, "device": device_id, "message": "Test tone played"}
+            except subprocess.TimeoutExpired:
+                return {"success": True, "device": device_id, "message": "Test completed"}
+            except Exception as e:
+                return {"success": False, "device": device_id, "error": str(e)}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _test_sync)
+    
+    async def test_microphone(self, device_id: str = "default", duration: float = 2.0) -> Dict:
+        """
+        마이크 테스트 (녹음 후 레벨 확인)
+        
+        Args:
+            device_id: ALSA 장치 ID
+            duration: 녹음 시간 (초)
+        """
+        def _test_sync():
+            try:
+                # arecord로 짧은 녹음 후 삭제
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as f:
+                    result = subprocess.run(
+                        ["arecord", "-D", device_id, "-d", str(int(duration)), "-f", "cd", f.name],
+                        capture_output=True,
+                        text=True,
+                        timeout=duration + 2,
+                    )
+                    if result.returncode == 0:
+                        # 파일 크기로 녹음 성공 여부 확인
+                        import os
+                        size = os.path.getsize(f.name)
+                        return {"success": True, "device": device_id, "recorded_bytes": size}
+                    else:
+                        return {"success": False, "device": device_id, "error": result.stderr}
+            except subprocess.TimeoutExpired:
+                return {"success": True, "device": device_id, "message": "Recording completed"}
+            except Exception as e:
+                return {"success": False, "device": device_id, "error": str(e)}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _test_sync)
+

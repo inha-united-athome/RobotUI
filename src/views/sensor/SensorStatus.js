@@ -147,7 +147,7 @@ const RawSensorStatusCard = () => {
                             )}
                         </div>
 
-                        {/* Audio 장치 */}
+                        {/* Audio 장치 - 기본 상태만 표시 */}
                         <h6 className="mb-2">🔊 Audio Devices</h6>
                         <CRow className="mb-3">
                             {sensorData.audio?.map((audio, idx) => (
@@ -166,6 +166,145 @@ const RawSensorStatusCard = () => {
                             ))}
                         </CRow>
                     </>
+                )}
+            </CCardBody>
+        </CCard>
+    )
+}
+
+// 오디오 테스트 카드
+const AudioTestCard = () => {
+    const [audioDevices, setAudioDevices] = useState(null)
+    const [selectedSpeaker, setSelectedSpeaker] = useState('default')
+    const [selectedMic, setSelectedMic] = useState('default')
+    const [testing, setTesting] = useState(null)
+    const [testResult, setTestResult] = useState(null)
+    const [loading, setLoading] = useState(false)
+
+    const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
+
+    const loadDevices = async () => {
+        setLoading(true)
+        try {
+            const res = await fetch(`${API_BASE}/api/sensors/audio/list`)
+            const data = await res.json()
+            setAudioDevices(data)
+        } catch (e) {
+            console.error(e)
+        }
+        setLoading(false)
+    }
+
+    const testSpeaker = async () => {
+        setTesting('speaker')
+        setTestResult(null)
+        try {
+            const res = await fetch(`${API_BASE}/api/sensors/audio/test/speaker?device_id=${selectedSpeaker}`, {
+                method: 'POST'
+            })
+            const data = await res.json()
+            setTestResult({ type: 'speaker', ...data })
+        } catch (e) {
+            setTestResult({ type: 'speaker', success: false, error: e.message })
+        }
+        setTesting(null)
+    }
+
+    const testMicrophone = async () => {
+        setTesting('microphone')
+        setTestResult(null)
+        try {
+            const res = await fetch(`${API_BASE}/api/sensors/audio/test/microphone?device_id=${selectedMic}`, {
+                method: 'POST'
+            })
+            const data = await res.json()
+            setTestResult({ type: 'microphone', ...data })
+        } catch (e) {
+            setTestResult({ type: 'microphone', success: false, error: e.message })
+        }
+        setTesting(null)
+    }
+
+    return (
+        <CCard className="mb-4">
+            <CCardHeader className="d-flex justify-content-between align-items-center">
+                <strong>🎧 Audio Device Test</strong>
+                <CButton size="sm" color="light" onClick={loadDevices} disabled={loading}>
+                    {loading ? <CSpinner size="sm" /> : <CIcon icon={cilReload} />}
+                </CButton>
+            </CCardHeader>
+            <CCardBody>
+                {!audioDevices && (
+                    <CButton color="primary" onClick={loadDevices}>
+                        Load Audio Devices
+                    </CButton>
+                )}
+
+                {audioDevices && (
+                    <CRow>
+                        {/* 스피커 */}
+                        <CCol md={6}>
+                            <h6>🔊 Speaker</h6>
+                            <select
+                                className="form-select form-select-sm mb-2"
+                                value={selectedSpeaker}
+                                onChange={(e) => setSelectedSpeaker(e.target.value)}
+                            >
+                                <option value="default">Default</option>
+                                {audioDevices.speakers?.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name} ({s.id})
+                                    </option>
+                                ))}
+                            </select>
+                            <CButton
+                                size="sm"
+                                color="primary"
+                                onClick={testSpeaker}
+                                disabled={testing === 'speaker'}
+                            >
+                                {testing === 'speaker' ? <CSpinner size="sm" /> : '🔊 Test Speaker'}
+                            </CButton>
+                        </CCol>
+
+                        {/* 마이크 */}
+                        <CCol md={6}>
+                            <h6>🎤 Microphone</h6>
+                            <select
+                                className="form-select form-select-sm mb-2"
+                                value={selectedMic}
+                                onChange={(e) => setSelectedMic(e.target.value)}
+                            >
+                                <option value="default">Default</option>
+                                {audioDevices.microphones?.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                        {m.name} ({m.id})
+                                    </option>
+                                ))}
+                            </select>
+                            <CButton
+                                size="sm"
+                                color="info"
+                                onClick={testMicrophone}
+                                disabled={testing === 'microphone'}
+                            >
+                                {testing === 'microphone' ? <CSpinner size="sm" /> : '🎤 Test Microphone'}
+                            </CButton>
+                        </CCol>
+                    </CRow>
+                )}
+
+                {testResult && (
+                    <CAlert
+                        color={testResult.success ? 'success' : 'danger'}
+                        className="mt-3 py-2"
+                    >
+                        <strong>{testResult.type === 'speaker' ? '🔊' : '🎤'} Test Result:</strong>{' '}
+                        {testResult.success
+                            ? (testResult.message || 'Success!')
+                            : `Failed: ${testResult.error}`
+                        }
+                    </CAlert>
                 )}
             </CCardBody>
         </CCard>
@@ -233,6 +372,9 @@ const SensorStatus = () => {
                     <PingTestCard />
                 </CCol>
             </CRow>
+
+            {/* 오디오 테스트 */}
+            <AudioTestCard />
 
             {/* ROS 토픽 기반 센서 상태 */}
             <CCard className="mb-4">

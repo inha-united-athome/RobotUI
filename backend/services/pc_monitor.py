@@ -87,6 +87,7 @@ class PCMonitorService:
             client = self._get_ssh_client(pc_config)
             
             # Python 스크립트로 모든 정보 한 번에 조회
+            # CPU percent는 interval=0.5로 더 정확하게 측정
             script = '''
 python3 -c "
 import json
@@ -95,23 +96,49 @@ import subprocess
 from datetime import datetime
 
 result = {}
-result['cpu_percent'] = psutil.cpu_percent(interval=0.1)
+
+# CPU - interval을 0.5로 늘려서 더 정확한 값 측정
+result['cpu_percent'] = psutil.cpu_percent(interval=0.5)
 
 mem = psutil.virtual_memory()
 result['memory_percent'] = mem.percent
 result['memory_used_gb'] = round(mem.used / (1024**3), 2)
 result['memory_total_gb'] = round(mem.total / (1024**3), 2)
 
+# Jetson의 경우 tegrastats 또는 nvidia-smi 대신 다른 방법 사용
 try:
-    gpu_output = subprocess.check_output([
-        'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,power.draw,temperature.gpu',
-        '--format=csv,noheader,nounits'
-    ], timeout=3).decode().strip().split(',')
-    result['gpu_percent'] = float(gpu_output[0].strip())
-    result['gpu_memory_used_mb'] = int(gpu_output[1].strip())
-    result['gpu_memory_total_mb'] = int(gpu_output[2].strip())
-    result['power_watts'] = float(gpu_output[3].strip())
-    result['temperature'] = float(gpu_output[4].strip())
+    # 먼저 tegrastats 확인 (Jetson용)
+    import os
+    if os.path.exists('/usr/bin/tegrastats'):
+        # Jetson에서는 GPU/CPU가 통합되어 있음, power/temp 조회
+        with open('/sys/devices/gpu.0/load', 'r') as f:
+            result['gpu_percent'] = int(f.read().strip()) / 10.0
+    else:
+        # 일반 NVIDIA GPU
+        gpu_output = subprocess.check_output([
+            'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,power.draw,temperature.gpu',
+            '--format=csv,noheader,nounits'
+        ], timeout=3).decode().strip().split(',')
+        result['gpu_percent'] = float(gpu_output[0].strip())
+        result['gpu_memory_used_mb'] = int(gpu_output[1].strip())
+        result['gpu_memory_total_mb'] = int(gpu_output[2].strip())
+        result['power_watts'] = float(gpu_output[3].strip())
+        result['temperature'] = float(gpu_output[4].strip())
+except Exception as e:
+    result['gpu_error'] = str(e)
+
+# Temperature (thermal zone)
+try:
+    with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+        result['temperature'] = round(int(f.read().strip()) / 1000.0, 1)
+except:
+    pass
+
+# Power (Jetson)
+try:
+    import subprocess
+    power_out = subprocess.check_output(['cat', '/sys/bus/i2c/drivers/ina3221x/1-0040/iio:device0/in_power0_input'], timeout=2)
+    result['power_watts'] = round(int(power_out.strip()) / 1000.0, 1)
 except:
     pass
 
@@ -119,10 +146,14 @@ result['pc_time'] = datetime.now().isoformat()
 print(json.dumps(result))
 "
 '''
-            stdin, stdout, stderr = client.exec_command(script, timeout=10)
+            stdin, stdout, stderr = client.exec_command(script, timeout=15)
             output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
             
-            return json.loads(output)
+            if error and not output:
+                return {"error": error}
+            
+            return json.loads(output) if output else {"error": "No output"}
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _get_sync)
