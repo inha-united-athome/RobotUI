@@ -1,0 +1,245 @@
+import React, { useState } from 'react'
+import {
+    CCard,
+    CCardBody,
+    CCardHeader,
+    CCol,
+    CRow,
+    CProgress,
+    CBadge,
+    CTable,
+    CTableHead,
+    CTableBody,
+    CTableRow,
+    CTableHeaderCell,
+    CTableDataCell,
+    CFormInput,
+    CButton,
+    CSpinner,
+    CAlert,
+} from '@coreui/react'
+import CIcon from '@coreui/icons-react'
+import {
+    cilRouter,
+    cilCheckCircle,
+    cilXCircle,
+    cilGlobeAlt,
+    cilReload,
+} from '@coreui/icons'
+import { useSensorsStatus, useRosTopics, pingHost } from '../../hooks/useApi'
+
+// ROS 토픽 기반 센서 목록
+const ROS_SENSORS = [
+    { name: 'RGB Camera', topic: '/camera/color/image_raw' },
+    { name: 'Depth Camera', topic: '/camera/depth/image_rect_raw' },
+    { name: '2D LiDAR', topic: '/scan' },
+    { name: '3D LiDAR', topic: '/points' },
+    { name: 'IMU', topic: '/imu/data' },
+    { name: 'Force Sensor L', topic: '/force_sensor/left' },
+    { name: 'Force Sensor R', topic: '/force_sensor/right' },
+]
+
+// ROS 토픽 센서 행
+const RosSensorRow = ({ sensor, topicsData }) => {
+    const topicData = topicsData?.[sensor.topic]
+    const isActive = topicData?.available ?? false
+
+    return (
+        <CTableRow>
+            <CTableDataCell>
+                <CIcon
+                    icon={isActive ? cilCheckCircle : cilXCircle}
+                    className={`text-${isActive ? 'success' : 'danger'} me-2`}
+                />
+                {sensor.name}
+            </CTableDataCell>
+            <CTableDataCell>
+                <code className="small">{sensor.topic}</code>
+            </CTableDataCell>
+            <CTableDataCell className="text-center">
+                <CBadge color={isActive ? 'success' : 'secondary'}>
+                    {isActive ? 'Active' : 'Inactive'}
+                </CBadge>
+            </CTableDataCell>
+            <CTableDataCell>
+                {topicData?.timestamp && (
+                    <small className="text-body-secondary">
+                        {new Date(topicData.timestamp).toLocaleTimeString()}
+                    </small>
+                )}
+            </CTableDataCell>
+        </CTableRow>
+    )
+}
+
+// API 기반 센서 상태 카드 (Raw 접근)
+const RawSensorStatusCard = () => {
+    const { data: sensorData, error, loading, refetch } = useSensorsStatus(3000)
+
+    return (
+        <CCard className="mb-4">
+            <CCardHeader className="d-flex justify-content-between align-items-center">
+                <strong><CIcon icon={cilRouter} className="me-2" />Raw Sensor Status (IP/USB)</strong>
+                <CButton size="sm" color="light" onClick={refetch}>
+                    <CIcon icon={cilReload} />
+                </CButton>
+            </CCardHeader>
+            <CCardBody>
+                {error && (
+                    <CAlert color="warning" className="py-1">
+                        API 연결 실패: {error}
+                    </CAlert>
+                )}
+
+                {loading && <CSpinner size="sm" />}
+
+                {sensorData && (
+                    <>
+                        {/* LiDAR 상태 */}
+                        <h6 className="mb-2">📡 LiDAR (IP Ping)</h6>
+                        <CRow className="mb-3">
+                            {sensorData.lidars?.map((lidar) => (
+                                <CCol md={6} key={lidar.ip}>
+                                    <div className={`border-start border-start-4 border-start-${lidar.online ? 'success' : 'danger'} py-2 px-3 mb-2`}>
+                                        <div className="d-flex justify-content-between">
+                                            <span>{lidar.name}</span>
+                                            <CBadge color={lidar.online ? 'success' : 'danger'}>
+                                                {lidar.online ? `${lidar.ping_ms?.toFixed(1)}ms` : 'Offline'}
+                                            </CBadge>
+                                        </div>
+                                        <small className="text-body-secondary">{lidar.ip}</small>
+                                    </div>
+                                </CCol>
+                            ))}
+                        </CRow>
+
+                        {/* RealSense 상태 */}
+                        <h6 className="mb-2">📷 RealSense Cameras (rs-enumerate)</h6>
+                        <CRow className="mb-3">
+                            {sensorData.realsense?.map((rs, idx) => (
+                                <CCol md={4} key={rs.serial || idx}>
+                                    <div className={`border-start border-start-4 border-start-${rs.connected ? 'success' : 'danger'} py-2 px-3 mb-2`}>
+                                        <div className="d-flex justify-content-between">
+                                            <span>{rs.name}</span>
+                                            <CBadge color={rs.connected ? 'success' : 'danger'}>
+                                                {rs.connected ? 'Connected' : 'Disconnected'}
+                                            </CBadge>
+                                        </div>
+                                        <small className="text-body-secondary">S/N: {rs.serial || 'Not set'}</small>
+                                        {rs.device_name && (
+                                            <div><small className="text-info">{rs.device_name}</small></div>
+                                        )}
+                                    </div>
+                                </CCol>
+                            ))}
+                        </CRow>
+
+                        {/* Video 디바이스 */}
+                        <h6 className="mb-2">🎥 Video Devices (/dev/video*)</h6>
+                        <div className="d-flex flex-wrap gap-2">
+                            {sensorData.cameras?.map((cam) => (
+                                <CBadge key={cam.device} color={cam.available ? 'success' : 'secondary'}>
+                                    {cam.device}
+                                </CBadge>
+                            ))}
+                            {(!sensorData.cameras || sensorData.cameras.length === 0) && (
+                                <span className="text-body-secondary">No video devices found</span>
+                            )}
+                        </div>
+                    </>
+                )}
+            </CCardBody>
+        </CCard>
+    )
+}
+
+// Ping 테스트 카드
+const PingTestCard = () => {
+    const [pingTarget, setPingTarget] = useState('192.168.0.1')
+    const [pingResult, setPingResult] = useState(null)
+    const [pinging, setPinging] = useState(false)
+
+    const handlePing = async () => {
+        setPinging(true)
+        try {
+            const result = await pingHost(pingTarget)
+            setPingResult(result)
+        } catch (err) {
+            setPingResult({ online: false, error: err.message })
+        } finally {
+            setPinging(false)
+        }
+    }
+
+    return (
+        <CCard className="mb-4">
+            <CCardHeader>
+                <strong>🏓 Ping Test</strong>
+            </CCardHeader>
+            <CCardBody>
+                <div className="d-flex gap-2 mb-3">
+                    <CFormInput
+                        type="text"
+                        value={pingTarget}
+                        onChange={(e) => setPingTarget(e.target.value)}
+                        placeholder="IP Address"
+                    />
+                    <CButton color="primary" onClick={handlePing} disabled={pinging}>
+                        {pinging ? <CSpinner size="sm" /> : 'Ping'}
+                    </CButton>
+                </div>
+                {pingResult && (
+                    <CAlert color={pingResult.online ? 'success' : 'danger'} className="mb-0">
+                        {pingResult.online
+                            ? `✅ ${pingTarget} is reachable (${pingResult.ping_ms?.toFixed(1)}ms)`
+                            : `❌ ${pingTarget} is not reachable`}
+                    </CAlert>
+                )}
+            </CCardBody>
+        </CCard>
+    )
+}
+
+const SensorStatus = () => {
+    const { data: topicsData } = useRosTopics(3000)
+
+    return (
+        <>
+            <CRow>
+                <CCol md={8}>
+                    {/* Raw API 기반 센서 상태 */}
+                    <RawSensorStatusCard />
+                </CCol>
+                <CCol md={4}>
+                    <PingTestCard />
+                </CCol>
+            </CRow>
+
+            {/* ROS 토픽 기반 센서 상태 */}
+            <CCard className="mb-4">
+                <CCardHeader>
+                    <strong><CIcon icon={cilGlobeAlt} className="me-2" />ROS2 Topic Sensor Status</strong>
+                </CCardHeader>
+                <CCardBody>
+                    <CTable hover responsive>
+                        <CTableHead>
+                            <CTableRow>
+                                <CTableHeaderCell>Sensor</CTableHeaderCell>
+                                <CTableHeaderCell>Topic</CTableHeaderCell>
+                                <CTableHeaderCell className="text-center">Status</CTableHeaderCell>
+                                <CTableHeaderCell>Last Update</CTableHeaderCell>
+                            </CTableRow>
+                        </CTableHead>
+                        <CTableBody>
+                            {ROS_SENSORS.map((sensor) => (
+                                <RosSensorRow key={sensor.topic} sensor={sensor} topicsData={topicsData} />
+                            ))}
+                        </CTableBody>
+                    </CTable>
+                </CCardBody>
+            </CCard>
+        </>
+    )
+}
+
+export default SensorStatus

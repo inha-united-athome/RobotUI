@@ -1,0 +1,15 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+paramiko>=3.4.0
+psutil>=5.9.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# ROS2 관련 (ros2 환경에서 이미 설치됨)
+# rclpy
+# sensor_msgs
+# geometry_msgs
+# std_msgs
+# nav_msgs
+# diagnostic_msgs
+# tf2_msgs
