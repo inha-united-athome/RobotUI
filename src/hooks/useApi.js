@@ -50,6 +50,13 @@ export const usePCStatus = (pcId, interval = 2000) => {
 }
 
 /**
+ * PC 프로세스 목록 조회 훅
+ */
+export const usePCProcesses = (pcId, interval = 5000) => {
+    return useApiData(`/api/pc/${pcId}/processes?top_n=10`, interval)
+}
+
+/**
  * 모든 PC 상태 조회 훅
  */
 export const useAllPCStatus = (interval = 2000) => {

@@ -174,3 +174,83 @@ print(json.dumps(result))
             except:
                 pass
         self._ssh_clients.clear()
+    
+    async def get_processes(self, pc_config: PCConfig, is_local: bool = False, top_n: int = 10) -> list:
+        """
+        CPU/메모리 상위 프로세스 목록 조회
+        
+        Args:
+            pc_config: PC 설정
+            is_local: True면 로컬 PC
+            top_n: 반환할 프로세스 수
+        """
+        if is_local:
+            return await self._get_local_processes(top_n)
+        else:
+            return await self._get_remote_processes(pc_config, top_n)
+    
+    async def _get_local_processes(self, top_n: int = 10) -> list:
+        """로컬 PC 프로세스 목록"""
+        def _get_sync():
+            processes = []
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
+                try:
+                    pinfo = proc.info
+                    if pinfo['cpu_percent'] is not None and pinfo['memory_percent'] is not None:
+                        processes.append({
+                            'pid': pinfo['pid'],
+                            'name': pinfo['name'],
+                            'cpu_percent': round(pinfo['cpu_percent'], 1),
+                            'memory_percent': round(pinfo['memory_percent'], 1),
+                            'user': pinfo['username'] or 'N/A',
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # CPU 사용률 기준 정렬
+            processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+            return processes[:top_n]
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+    
+    async def _get_remote_processes(self, pc_config: PCConfig, top_n: int = 10) -> list:
+        """원격 PC 프로세스 목록 (SSH)"""
+        if not HAS_PARAMIKO:
+            return []
+        
+        def _get_sync():
+            client = self._get_ssh_client(pc_config)
+            
+            script = f'''
+python3 -c "
+import json
+import psutil
+
+processes = []
+for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
+    try:
+        pinfo = proc.info
+        if pinfo['cpu_percent'] is not None and pinfo['memory_percent'] is not None:
+            processes.append({{
+                'pid': pinfo['pid'],
+                'name': pinfo['name'],
+                'cpu_percent': round(pinfo['cpu_percent'], 1),
+                'memory_percent': round(pinfo['memory_percent'], 1),
+                'user': pinfo['username'] or 'N/A',
+            }})
+    except:
+        pass
+
+processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+print(json.dumps(processes[:{top_n}]))
+"
+'''
+            stdin, stdout, stderr = client.exec_command(script, timeout=10)
+            output = stdout.read().decode().strip()
+            
+            return json.loads(output) if output else []
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+

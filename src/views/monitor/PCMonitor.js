@@ -14,6 +14,13 @@ import {
     CTabPane,
     CWidgetStatsF,
     CAlert,
+    CTable,
+    CTableHead,
+    CTableBody,
+    CTableRow,
+    CTableHeaderCell,
+    CTableDataCell,
+    CSpinner,
 } from '@coreui/react'
 import CIcon from '@coreui/icons-react'
 import {
@@ -24,9 +31,10 @@ import {
     cilClock,
     cilCheckCircle,
     cilXCircle,
+    cilList,
 } from '@coreui/icons'
 import { useRosTopic } from '../../hooks/useRosTopic'
-import { usePCStatus, useAllPCStatus } from '../../hooks/useApi'
+import { usePCStatus, useAllPCStatus, usePCProcesses } from '../../hooks/useApi'
 
 // PC 상태 카드 (API + ROS 데이터)
 const SinglePCMonitor = ({ pcId, name }) => {
@@ -41,7 +49,6 @@ const SinglePCMonitor = ({ pcId, name }) => {
     // API 데이터 우선, ROS 데이터 fallback
     const cpuPercent = apiData?.cpu_percent ?? rosCpu?.data ?? 0
     const memoryPercent = apiData?.memory_percent ?? rosMemory?.data ?? 0
-    const gpuPercent = apiData?.gpu_percent ?? 0
     const powerWatts = apiData?.power_watts ?? 0
     const temperature = apiData?.temperature ?? 0
     const isOnline = apiData?.online ?? false
@@ -93,21 +100,7 @@ const SinglePCMonitor = ({ pcId, name }) => {
                     <CProgress value={memoryPercent} color={getColor(memoryPercent)} />
                 </div>
 
-                {/* GPU */}
-                <div className="mb-3">
-                    <div className="d-flex justify-content-between mb-1">
-                        <span><CIcon icon={cilStorage} className="me-1" />GPU</span>
-                        <span className="fw-semibold">
-                            {gpuPercent.toFixed(1)}%
-                            {apiData?.gpu_memory_used_mb && (
-                                <small className="text-body-secondary ms-1">
-                                    ({apiData.gpu_memory_used_mb}/{apiData.gpu_memory_total_mb} MB)
-                                </small>
-                            )}
-                        </span>
-                    </div>
-                    <CProgress value={gpuPercent} color={getColor(gpuPercent)} />
-                </div>
+                {/* GPU - Jetson은 통합 메모리라 별도 표시 불필요 */}
 
                 {/* Power & Temp */}
                 <CRow className="text-center">
@@ -134,14 +127,14 @@ const SinglePCMonitor = ({ pcId, name }) => {
                                     <div className="d-flex justify-content-between align-items-center">
                                         <div>
                                             <small className="text-body-secondary"><CIcon icon={cilClock} /> PC Time</small>
-                                            <div className="fw-semibold">
-                                                {apiData.pc_time ? new Date(apiData.pc_time).toLocaleTimeString() : 'N/A'}
+                                            <div className="fw-semibold" style={{ fontSize: '0.85rem' }}>
+                                                {apiData.pc_time ? new Date(apiData.pc_time).toLocaleString('ko-KR') : 'N/A'}
                                             </div>
                                         </div>
                                         <div className="text-end">
                                             <small className="text-body-secondary">LAN Time</small>
-                                            <div className="fw-semibold">
-                                                {apiData.lan_time ? new Date(apiData.lan_time).toLocaleTimeString() : 'N/A'}
+                                            <div className="fw-semibold" style={{ fontSize: '0.85rem' }}>
+                                                {apiData.lan_time ? new Date(apiData.lan_time).toLocaleString('ko-KR') : 'N/A'}
                                             </div>
                                         </div>
                                         <div className="text-end">
@@ -156,6 +149,73 @@ const SinglePCMonitor = ({ pcId, name }) => {
                         </CCol>
                     </CRow>
                 )}
+            </CCardBody>
+        </CCard>
+    )
+}
+
+// 프로세스 목록 컴포넌트 (jtop 스타일)
+const ProcessList = ({ pcId, name }) => {
+    const { data, error, loading } = usePCProcesses(pcId, 5000)
+    const processes = data?.processes || []
+
+    return (
+        <CCard className="mb-4">
+            <CCardHeader className="d-flex justify-content-between align-items-center">
+                <strong><CIcon icon={cilList} className="me-2" />Top Processes - {name}</strong>
+                {loading && <CSpinner size="sm" />}
+            </CCardHeader>
+            <CCardBody className="p-0">
+                {error && (
+                    <CAlert color="warning" className="m-3 py-1">
+                        프로세스 조회 실패: {error}
+                    </CAlert>
+                )}
+                <CTable hover responsive small className="mb-0">
+                    <CTableHead>
+                        <CTableRow className="bg-body-tertiary">
+                            <CTableHeaderCell style={{ width: '60px' }}>PID</CTableHeaderCell>
+                            <CTableHeaderCell>Process</CTableHeaderCell>
+                            <CTableHeaderCell style={{ width: '90px' }} className="text-end">CPU %</CTableHeaderCell>
+                            <CTableHeaderCell style={{ width: '90px' }} className="text-end">MEM %</CTableHeaderCell>
+                            <CTableHeaderCell style={{ width: '100px' }}>User</CTableHeaderCell>
+                        </CTableRow>
+                    </CTableHead>
+                    <CTableBody>
+                        {processes.length === 0 && !loading && (
+                            <CTableRow>
+                                <CTableDataCell colSpan={5} className="text-center text-body-secondary py-3">
+                                    프로세스 정보 없음
+                                </CTableDataCell>
+                            </CTableRow>
+                        )}
+                        {processes.map((proc, idx) => (
+                            <CTableRow key={`${proc.pid}-${idx}`}>
+                                <CTableDataCell>
+                                    <code className="small">{proc.pid}</code>
+                                </CTableDataCell>
+                                <CTableDataCell>
+                                    <span className="text-truncate d-inline-block" style={{ maxWidth: '200px' }}>
+                                        {proc.name}
+                                    </span>
+                                </CTableDataCell>
+                                <CTableDataCell className="text-end">
+                                    <CBadge color={proc.cpu_percent > 50 ? 'danger' : proc.cpu_percent > 20 ? 'warning' : 'success'}>
+                                        {proc.cpu_percent.toFixed(1)}%
+                                    </CBadge>
+                                </CTableDataCell>
+                                <CTableDataCell className="text-end">
+                                    <CBadge color={proc.memory_percent > 20 ? 'warning' : 'info'}>
+                                        {proc.memory_percent.toFixed(1)}%
+                                    </CBadge>
+                                </CTableDataCell>
+                                <CTableDataCell>
+                                    <small className="text-body-secondary">{proc.user}</small>
+                                </CTableDataCell>
+                            </CTableRow>
+                        ))}
+                    </CTableBody>
+                </CTable>
             </CCardBody>
         </CCard>
     )
@@ -202,9 +262,11 @@ const PCMonitor = () => {
                         </CTabPane>
                         <CTabPane visible={activeTab === 'pc1'}>
                             <SinglePCMonitor pcId="pc1" name="PC 1 (Main)" />
+                            <ProcessList pcId="pc1" name="PC 1 (Main)" />
                         </CTabPane>
                         <CTabPane visible={activeTab === 'pc2'}>
                             <SinglePCMonitor pcId="pc2" name="PC 2 (Slave)" />
+                            <ProcessList pcId="pc2" name="PC 2 (Slave)" />
                         </CTabPane>
                     </CTabContent>
                 </CCardBody>
@@ -227,13 +289,13 @@ const PCMonitor = () => {
                             <div className="border-start border-start-4 border-start-info py-1 px-3">
                                 <div className="text-body-secondary small">ROS2 Topics (Fallback)</div>
                                 <code>/system_monitor/pc{'{1,2}'}/*</code>
-              </div>
-            </CCol>
-          </CRow>
-        </CCardBody>
-      </CCard>
-    </>
-  )
+                            </div>
+                        </CCol>
+                    </CRow>
+                </CCardBody>
+            </CCard>
+        </>
+    )
 }
 
 export default PCMonitor

@@ -52,8 +52,14 @@ class AppConfig(BaseModel):
     
     # 센서 설정
     sensors: List[SensorConfig] = [
-        SensorConfig(name="2D LiDAR", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP", "192.168.1.20")),
-        SensorConfig(name="3D LiDAR", type="lidar_3d", ip=os.getenv("LIDAR_3D_IP", "192.168.1.21")),
+        # LiDAR (2D 2개, 3D 1개)
+        SensorConfig(name="2D LiDAR #1", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP_1", os.getenv("LIDAR_2D_IP", "192.168.30.10"))),
+        SensorConfig(name="2D LiDAR #2", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP_2", "192.168.30.12")),
+        SensorConfig(name="3D LiDAR", type="lidar_3d", ip=os.getenv("LIDAR_3D_IP", "192.168.30.11")),
+        # Audio
+        SensorConfig(name="Speaker", type="audio_output"),
+        SensorConfig(name="Microphone", type="audio_input"),
+        # RealSense
         SensorConfig(name="RealSense #1", type="realsense", serial=os.getenv("RS_SERIAL_1", "")),
         SensorConfig(name="RealSense #2", type="realsense", serial=os.getenv("RS_SERIAL_2", "")),
         SensorConfig(name="RealSense #3", type="realsense", serial=os.getenv("RS_SERIAL_3", "")),

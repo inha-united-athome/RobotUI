@@ -136,7 +136,7 @@ const RawSensorStatusCard = () => {
 
                         {/* Video 디바이스 */}
                         <h6 className="mb-2">🎥 Video Devices (/dev/video*)</h6>
-                        <div className="d-flex flex-wrap gap-2">
+                        <div className="d-flex flex-wrap gap-2 mb-3">
                             {sensorData.cameras?.map((cam) => (
                                 <CBadge key={cam.device} color={cam.available ? 'success' : 'secondary'}>
                                     {cam.device}
@@ -146,6 +146,25 @@ const RawSensorStatusCard = () => {
                                 <span className="text-body-secondary">No video devices found</span>
                             )}
                         </div>
+
+                        {/* Audio 장치 */}
+                        <h6 className="mb-2">🔊 Audio Devices</h6>
+                        <CRow className="mb-3">
+                            {sensorData.audio?.map((audio, idx) => (
+                                <CCol md={6} key={audio.type || idx}>
+                                    <div className={`border-start border-start-4 border-start-${audio.connected ? 'success' : 'danger'} py-2 px-3 mb-2`}>
+                                        <div className="d-flex justify-content-between">
+                                            <span>
+                                                {audio.type === 'speaker' ? '🔊' : '🎤'} {audio.name}
+                                            </span>
+                                            <CBadge color={audio.connected ? 'success' : 'danger'}>
+                                                {audio.connected ? 'Connected' : 'Disconnected'}
+                                            </CBadge>
+                                        </div>
+                                    </div>
+                                </CCol>
+                            ))}
+                        </CRow>
                     </>
                 )}
             </CCardBody>

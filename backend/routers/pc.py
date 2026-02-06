@@ -133,3 +133,24 @@ async def get_pc_config():
             "port": config.pcs["pc2"].port,
         }
     }
+
+
+@router.get("/{pc_id}/processes")
+async def get_pc_processes(pc_id: str, top_n: int = 10):
+    """특정 PC의 상위 프로세스 목록 조회"""
+    is_local = (pc_id == "pc1")
+    
+    if not is_local and pc_id not in config.pcs:
+        raise HTTPException(status_code=404, detail=f"PC '{pc_id}' not found")
+    
+    try:
+        if is_local:
+            processes = await pc_service.get_processes(None, is_local=True, top_n=top_n)
+        else:
+            pc_config = config.pcs[pc_id]
+            processes = await pc_service.get_processes(pc_config, is_local=False, top_n=top_n)
+        
+        return {"pc_id": pc_id, "processes": processes}
+    except Exception as e:
+        return {"pc_id": pc_id, "processes": [], "error": str(e)}
+

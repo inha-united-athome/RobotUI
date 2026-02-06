@@ -23,7 +23,7 @@ class SensorCheckService:
             try:
                 # Linux ping: -c 1 (1회), -W timeout (초)
                 result = subprocess.run(
-                    ["ping", "-c", "1", "-W", str(int(timeout))],
+                    ["ping", "-c", "1", "-W", str(int(timeout)), ip],
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
@@ -152,3 +152,47 @@ class SensorCheckService:
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _check_sync)
+    
+    async def get_audio_devices(self) -> Dict[str, bool]:
+        """
+        오디오 장치 연결 상태 확인
+        aplay -l (스피커), arecord -l (마이크)
+        
+        Returns:
+            {"speaker": bool, "microphone": bool}
+        """
+        def _check_audio_sync():
+            result = {"speaker": False, "microphone": False}
+            
+            # 스피커 확인 (aplay -l)
+            try:
+                output = subprocess.run(
+                    ["aplay", "-l"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                # "card" 문자열이 있으면 스피커 장치 존재
+                if "card" in output.stdout.lower():
+                    result["speaker"] = True
+            except Exception:
+                pass
+            
+            # 마이크 확인 (arecord -l)
+            try:
+                output = subprocess.run(
+                    ["arecord", "-l"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                # "card" 문자열이 있으면 마이크 장치 존재
+                if "card" in output.stdout.lower():
+                    result["microphone"] = True
+            except Exception:
+                pass
+            
+            return result
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _check_audio_sync)

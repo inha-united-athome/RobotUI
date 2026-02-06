@@ -36,12 +36,20 @@ class CameraStatus(BaseModel):
     available: bool
 
 
+class AudioStatus(BaseModel):
+    """오디오 장치 상태"""
+    name: str
+    type: str  # "speaker" or "microphone"
+    connected: bool
+
+
 class SensorsStatusResponse(BaseModel):
     """전체 센서 상태 응답"""
     timestamp: datetime
     lidars: List[LidarStatus]
     realsense: List[RealSenseStatus]
     cameras: List[CameraStatus]
+    audio: List[AudioStatus]
 
 
 class SensorConfigRequest(BaseModel):
@@ -84,11 +92,19 @@ async def get_sensors_status():
     # 일반 카메라 확인
     cameras = await sensor_service.get_video_devices()
     
+    # 오디오 장치 확인
+    audio_status = await sensor_service.get_audio_devices()
+    audio_list = [
+        AudioStatus(name="Speaker", type="speaker", connected=audio_status.get("speaker", False)),
+        AudioStatus(name="Microphone", type="microphone", connected=audio_status.get("microphone", False)),
+    ]
+    
     return SensorsStatusResponse(
         timestamp=datetime.now(),
         lidars=lidars,
         realsense=realsense_list,
         cameras=cameras,
+        audio=audio_list,
     )
 
 
