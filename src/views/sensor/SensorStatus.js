@@ -180,6 +180,7 @@ const AudioTestCard = () => {
     const [testing, setTesting] = useState(null)
     const [testResult, setTestResult] = useState(null)
     const [loading, setLoading] = useState(false)
+    const [volume, setVolume] = useState({ speaker: 50, microphone: 50 })
 
     const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
 
