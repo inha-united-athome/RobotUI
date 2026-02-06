@@ -195,6 +195,30 @@ const AudioTestCard = () => {
         setLoading(false)
     }
 
+    // 장치 선택 변경 시 볼륨 다시 조회
+    useEffect(() => {
+        if (selectedSpeaker && selectedSpeaker !== 'default') {
+            updateVolume('speaker', selectedSpeaker)
+        }
+    }, [selectedSpeaker])
+
+    useEffect(() => {
+        if (selectedMic && selectedMic !== 'default') {
+            updateVolume('microphone', selectedMic)
+        }
+    }, [selectedMic])
+
+    const updateVolume = async (type, id) => {
+        try {
+            // 현재는 get_volume이 전체를 리턴하지만 device_id를 주면 해당 장치의 볼륨을 우선으로 가져오도록 백엔드가 수정됨
+            const res = await fetch(`${API_BASE}/api/sensors/audio/volume?device_id=${id}`)
+            const data = await res.json()
+            setVolume(prev => ({ ...prev, [type]: data[type] }))
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
     const testSpeaker = async () => {
         setTesting('speaker')
         setTestResult(null)
@@ -214,7 +238,9 @@ const AudioTestCard = () => {
         setTesting('microphone')
         setTestResult(null)
         try {
-            const res = await fetch(`${API_BASE}/api/sensors/audio/test/microphone?device_id=${selectedMic}`, {
+            // 마이크 테스트 시 스피커 ID도 함께 전송 (녹음 후 재생용)
+            // 녹음 3초 + 재생 3초 + 여유 = 약 6~7초 소요됨
+            const res = await fetch(`${API_BASE}/api/sensors/audio/test/microphone?device_id=${selectedMic}&speaker_id=${selectedSpeaker}`, {
                 method: 'POST'
             })
             const data = await res.json()
@@ -225,6 +251,21 @@ const AudioTestCard = () => {
         setTesting(null)
     }
 
+    const handleVolumeChange = async (deviceType, value) => {
+        setVolume(prev => ({ ...prev, [deviceType]: value }))
+    }
+
+    const applyVolume = async (deviceType) => {
+        try {
+            const deviceId = deviceType === 'speaker' ? selectedSpeaker : selectedMic
+            await fetch(`${API_BASE}/api/sensors/audio/volume?device_type=${deviceType}&volume=${volume[deviceType]}&device_id=${deviceId}`, {
+                method: 'POST'
+            })
+            setTestResult({ type: deviceType, success: true, message: `Volume set to ${volume[deviceType]}%` })
+        } catch (e) {
+            setTestResult({ type: deviceType, success: false, error: e.message })
+        }
+    }
     return (
         <CCard className="mb-4">
             <CCardHeader className="d-flex justify-content-between align-items-center">

@@ -105,7 +105,7 @@ class SensorCheckService:
     
     async def get_realsense_devices(self) -> Dict[str, str]:
         """
-        연결된 RealSense 기기 목록
+        연결된 RealSense 기기 목록 (PC2에서 SSH로 실행)
         rs-enumerate-devices 사용
         
         Returns:
@@ -114,34 +114,23 @@ class SensorCheckService:
         def _enumerate_sync():
             devices = {}
             try:
-                result = subprocess.run(
-                    ["rs-enumerate-devices"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
+                # PC2에서 rs-enumerate-devices 실행
+                stdout, stderr = self._run_remote_command("rs-enumerate-devices", timeout=10)
                 
-                if result.returncode == 0:
-                    lines = result.stdout.split('\n')
-                    current_name = None
-                    
-                    for line in lines:
-                        # Device Name 찾기
-                        if "Name" in line and ":" in line:
-                            current_name = line.split(":")[-1].strip()
-                        # Serial Number 찾기
-                        elif "Serial Number" in line and ":" in line:
-                            serial = line.split(":")[-1].strip()
-                            if serial and current_name:
-                                devices[serial] = current_name
-                                current_name = None
+                lines = stdout.split('\n')
+                current_name = None
                 
-            except FileNotFoundError:
-                # rs-enumerate-devices가 없는 경우
-                pass
-            except subprocess.TimeoutExpired:
-                pass
-            except Exception as e:
+                for line in lines:
+                    # Device Name 찾기
+                    if "Name" in line and ":" in line:
+                        current_name = line.split(":")[-1].strip()
+                    # Serial Number 찾기
+                    elif "Serial Number" in line and ":" in line:
+                        serial = line.split(":")[-1].strip()
+                        if serial and current_name:
+                            devices[serial] = current_name
+                            current_name = None
+            except Exception:
                 pass
             
             return devices
@@ -151,7 +140,7 @@ class SensorCheckService:
     
     async def get_video_devices(self) -> List[Dict]:
         """
-        사용 가능한 /dev/video* 디바이스 목록
+        사용 가능한 /dev/video* 디바이스 목록 (PC2에서 SSH로 실행)
         
         Returns:
             [{"device": "/dev/video0", "available": True}, ...]
@@ -159,23 +148,40 @@ class SensorCheckService:
         def _check_devices_sync():
             devices = []
             
-            # /dev/video* 찾기
-            dev_path = "/dev"
             try:
-                for entry in os.listdir(dev_path):
-                    if entry.startswith("video"):
-                        device_path = os.path.join(dev_path, entry)
-                        # 디바이스 접근 가능 여부 확인
-                        available = os.access(device_path, os.R_OK)
+                # PC2에서 /dev/video* 목록 확인
+                stdout, stderr = self._run_remote_command("ls -1 /dev/video*")
+                
+                for line in stdout.split('\n'):
+                    if line.startswith('/dev/video'):
+                        device_path = line.strip()
+                        # 사용 가능 여부 확인 (fuser로 점유 확인)
+                        try:
+                            fuser_out, _ = self._run_remote_command(f"fuser {device_path}")
+                            available = len(fuser_out.strip()) == 0
+                        except:
+                            available = True
+                            
+                        # V4L2 정보 확인 (USB ID 등)
+                        try:
+                            # udevadm info
+                            udev_out, _ = self._run_remote_command(f"udevadm info --query=all --name={device_path} | grep ID_VENDOR_ID")
+                            if "ID_VENDOR_ID" in udev_out:
+                                vendor_id = udev_out.split('=')[-1].strip()
+                                # RealSense 제외 (8086: Intel)
+                                if vendor_id == "8086":
+                                    continue
+                        except:
+                            pass
+
                         devices.append({
                             "device": device_path,
-                            "available": available,
+                            "available": available
                         })
+
             except Exception:
                 pass
             
-            # 정렬
-            devices.sort(key=lambda x: x["device"])
             return devices
         
         loop = asyncio.get_event_loop()
@@ -345,7 +351,7 @@ class SensorCheckService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _test_sync)
     
-    async def get_volume(self) -> Dict[str, int]:
+    async def get_volume(self, device_id: str = "default") -> Dict[str, int]:
         """
         현재 볼륨 조회 - PC2에서 SSH로 실행
         
@@ -355,58 +361,105 @@ class SensorCheckService:
         def _get_sync():
             result = {"speaker": 50, "microphone": 50}
             
-            # PC2에서 스피커 볼륨 조회 (Master 또는 PCM)
-            for control in ["Master", "PCM"]:
+            # 카드 번호 추출 (hw:X,Y -> X)
+            card_num = "0"
+            if device_id.startswith("hw:"):
                 try:
-                    stdout, stderr = self._run_remote_command(f"amixer get {control}")
-                    match = re.search(r'\[(\d+)%\]', stdout)
-                    if match:
-                        result["speaker"] = int(match.group(1))
-                        break
+                    card_num = device_id.split(":")[1].split(",")[0]
                 except:
                     pass
             
-            # PC2에서 마이크 볼륨 조회 (Capture 또는 Mic)
-            for control in ["Capture", "Mic"]:
+            # 1. 믹서 컨트롤 목록 조회 (amixer -c X scontrols)
+            # 2. 적절한 컨트롤(Master, PCM, Speaker / Capture, Mic) 찾기
+            # 3. 볼륨 조회
+            
+            def get_vol_for_type(controls_pool):
                 try:
-                    stdout, stderr = self._run_remote_command(f"amixer get {control}")
-                    match = re.search(r'\[(\d+)%\]', stdout)
-                    if match:
-                        result["microphone"] = int(match.group(1))
-                        break
+                    # scontrols 조회
+                    stdout, stderr = self._run_remote_command(f"amixer -c {card_num} scontrols")
+                    available_controls = []
+                    for line in stdout.split('\n'):
+                        if "Simple mixer control" in line:
+                            # Simple mixer control 'Master',0 -> Master
+                            ctrl = line.split("'")[1]
+                            available_controls.append(ctrl)
+                    
+                    # 우선순위에 따라 매칭
+                    target_control = None
+                    for candidate in controls_pool:
+                        if candidate in available_controls:
+                            target_control = candidate
+                            break
+                    
+                    if target_control:
+                        stdout, stderr = self._run_remote_command(f"amixer -c {card_num} get '{target_control}'")
+                        match = re.search(r'\[(\d+)%\]', stdout)
+                        if match:
+                            return int(match.group(1))
                 except:
                     pass
+                return 50 # 기본값
+            
+            result["speaker"] = get_vol_for_type(["Master", "PCM", "Speaker", "Headphone", "Playback"])
+            result["microphone"] = get_vol_for_type(["Capture", "Mic", "Microphone", "Input"])
             
             return result
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _get_sync)
     
-    async def set_volume(self, device_type: str, volume: int) -> Dict:
+    async def set_volume(self, device_type: str, volume: int, device_id: str = "default") -> Dict:
         """
         볼륨 설정 - PC2에서 SSH로 실행
         
         Args:
             device_type: "speaker" 또는 "microphone"
             volume: 0-100
+            device_id: 장치 ID (예: hw:1,0)
         """
         def _set_sync():
             volume_clamped = max(0, min(100, volume))
             
-            if device_type == "speaker":
-                controls = ["Master", "PCM"]
-            else:
-                controls = ["Capture", "Mic"]
-            
-            for control in controls:
+            # 카드 번호 추출
+            card_num = "0"
+            if device_id.startswith("hw:"):
                 try:
-                    stdout, stderr = self._run_remote_command(f"amixer set {control} {volume_clamped}%")
-                    if "%" in stdout:
-                        return {"success": True, "device": device_type, "volume": volume_clamped}
+                    card_num = device_id.split(":")[1].split(",")[0]
                 except:
-                    continue
+                    pass
             
-            return {"success": False, "device": device_type, "error": "No control found"}
+            try:
+                # 사용 가능한 컨트롤 확인
+                stdout, stderr = self._run_remote_command(f"amixer -c {card_num} scontrols")
+                available_controls = []
+                for line in stdout.split('\n'):
+                     if "Simple mixer control" in line:
+                         ctrl = line.split("'")[1]
+                         available_controls.append(ctrl)
+                
+                # 타겟 컨트롤 찾기
+                target_controls = []
+                if device_type == "speaker":
+                    candidates = ["Master", "PCM", "Speaker", "Headphone", "Playback"]
+                else:
+                    candidates = ["Capture", "Mic", "Microphone", "Input"]
+                
+                for cand in candidates:
+                    if cand in available_controls:
+                        target_controls.append(cand)
+                        # 보통 하나만 조절하면 되지만, Master/PCM 둘 다 있는 경우 둘 다 조절하면 확실함
+                
+                if not target_controls:
+                     return {"success": False, "device": device_type, "error": f"No volume control found for card {card_num}"}
+                
+                # 설정 적용
+                for ctrl in target_controls:
+                    self._run_remote_command(f"amixer -c {card_num} set '{ctrl}' {volume_clamped}%")
+                
+                return {"success": True, "device": device_type, "volume": volume_clamped, "card": card_num}
+                
+            except Exception as e:
+                return {"success": False, "device": device_type, "error": str(e)}
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _set_sync)

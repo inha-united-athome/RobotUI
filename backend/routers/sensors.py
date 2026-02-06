@@ -193,7 +193,7 @@ async def get_volume():
 
 
 @router.post("/audio/volume")
-async def set_volume(device_type: str, volume: int):
-    """볼륨 설정 (device_type: speaker/microphone, volume: 0-100)"""
-    result = await sensor_service.set_volume(device_type, volume)
+async def set_volume(device_type: str, volume: int, device_id: str = "default"):
+    """볼륨 설정 (device_type: speaker/microphone, volume: 0-100, device_id: 장치ID)"""
+    result = await sensor_service.set_volume(device_type, volume, device_id)
     return result
