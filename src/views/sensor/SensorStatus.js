@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
     CCard,
     CCardBody,
@@ -195,20 +195,7 @@ const AudioTestCard = () => {
         setLoading(false)
     }
 
-    // 장치 선택 변경 시 볼륨 다시 조회
-    useEffect(() => {
-        if (selectedSpeaker && selectedSpeaker !== 'default') {
-            updateVolume('speaker', selectedSpeaker)
-        }
-    }, [selectedSpeaker])
-
-    useEffect(() => {
-        if (selectedMic && selectedMic !== 'default') {
-            updateVolume('microphone', selectedMic)
-        }
-    }, [selectedMic])
-
-    const updateVolume = async (type, id) => {
+    const updateVolume = useCallback(async (type, id) => {
         try {
             // 현재는 get_volume이 전체를 리턴하지만 device_id를 주면 해당 장치의 볼륨을 우선으로 가져오도록 백엔드가 수정됨
             const res = await fetch(`${API_BASE}/api/sensors/audio/volume?device_id=${id}`)
@@ -217,7 +204,20 @@ const AudioTestCard = () => {
         } catch (e) {
             console.error(e)
         }
-    }
+    }, [API_BASE])
+
+    // 장치 선택 변경 시 볼륨 다시 조회
+    useEffect(() => {
+        if (selectedSpeaker && selectedSpeaker !== 'default') {
+            updateVolume('speaker', selectedSpeaker)
+        }
+    }, [selectedSpeaker, updateVolume])
+
+    useEffect(() => {
+        if (selectedMic && selectedMic !== 'default') {
+            updateVolume('microphone', selectedMic)
+        }
+    }, [selectedMic, updateVolume])
 
     const testSpeaker = async () => {
         setTesting('speaker')
