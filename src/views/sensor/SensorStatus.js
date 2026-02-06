@@ -298,6 +298,23 @@ const AudioTestCard = () => {
                                     </option>
                                 ))}
                             </select>
+
+                            {/* 볼륨 슬라이더 */}
+                            <div className="d-flex align-items-center gap-2 mb-2">
+                                <span className="small">Vol:</span>
+                                <input
+                                    type="range"
+                                    className="form-range flex-grow-1"
+                                    min="0"
+                                    max="100"
+                                    value={volume.speaker || 50}
+                                    onChange={(e) => handleVolumeChange('speaker', parseInt(e.target.value))}
+                                    onMouseUp={() => applyVolume('speaker')}
+                                    onTouchEnd={() => applyVolume('speaker')}
+                                />
+                                <span className="small fw-bold" style={{ minWidth: '35px' }}>{volume.speaker}%</span>
+                            </div>
+
                             <CButton
                                 size="sm"
                                 color="primary"
@@ -323,6 +340,23 @@ const AudioTestCard = () => {
                                     </option>
                                 ))}
                             </select>
+
+                            {/* 볼륨 슬라이더 */}
+                            <div className="d-flex align-items-center gap-2 mb-2">
+                                <span className="small">Vol:</span>
+                                <input
+                                    type="range"
+                                    className="form-range flex-grow-1"
+                                    min="0"
+                                    max="100"
+                                    value={volume.microphone || 50}
+                                    onChange={(e) => handleVolumeChange('microphone', parseInt(e.target.value))}
+                                    onMouseUp={() => applyVolume('microphone')}
+                                    onTouchEnd={() => applyVolume('microphone')}
+                                />
+                                <span className="small fw-bold" style={{ minWidth: '35px' }}>{volume.microphone}%</span>
+                            </div>
+
                             <CButton
                                 size="sm"
                                 color="info"
