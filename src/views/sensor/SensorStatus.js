@@ -180,7 +180,6 @@ const AudioTestCard = () => {
     const [testing, setTesting] = useState(null)
     const [testResult, setTestResult] = useState(null)
     const [loading, setLoading] = useState(false)
-    const [volume, setVolume] = useState({ speaker: 50, microphone: 50 })
 
     const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : ''
 
@@ -190,11 +189,6 @@ const AudioTestCard = () => {
             const res = await fetch(`${API_BASE}/api/sensors/audio/list`)
             const data = await res.json()
             setAudioDevices(data)
-
-            // 볼륨도 함께 로드
-            const volRes = await fetch(`${API_BASE}/api/sensors/audio/volume`)
-            const volData = await volRes.json()
-            setVolume(volData)
         } catch (e) {
             console.error(e)
         }
@@ -231,25 +225,10 @@ const AudioTestCard = () => {
         setTesting(null)
     }
 
-    const handleVolumeChange = async (deviceType, value) => {
-        setVolume(prev => ({ ...prev, [deviceType]: value }))
-    }
-
-    const applyVolume = async (deviceType) => {
-        try {
-            await fetch(`${API_BASE}/api/sensors/audio/volume?device_type=${deviceType}&volume=${volume[deviceType]}`, {
-                method: 'POST'
-            })
-            setTestResult({ type: deviceType, success: true, message: `Volume set to ${volume[deviceType]}%` })
-        } catch (e) {
-            setTestResult({ type: deviceType, success: false, error: e.message })
-        }
-    }
-
     return (
         <CCard className="mb-4">
             <CCardHeader className="d-flex justify-content-between align-items-center">
-                <strong>🎧 Audio Device Test & Volume</strong>
+                <strong>🎧 Audio Device Test</strong>
                 <CButton size="sm" color="light" onClick={loadDevices} disabled={loading}>
                     {loading ? <CSpinner size="sm" /> : <CIcon icon={cilReload} />}
                 </CButton>
@@ -278,30 +257,13 @@ const AudioTestCard = () => {
                                     </option>
                                 ))}
                             </select>
-
-                            {/* 볼륨 슬라이더 */}
-                            <div className="d-flex align-items-center gap-2 mb-2">
-                                <span className="small">Vol:</span>
-                                <input
-                                    type="range"
-                                    className="form-range flex-grow-1"
-                                    min="0"
-                                    max="100"
-                                    value={volume.speaker}
-                                    onChange={(e) => handleVolumeChange('speaker', parseInt(e.target.value))}
-                                    onMouseUp={() => applyVolume('speaker')}
-                                    onTouchEnd={() => applyVolume('speaker')}
-                                />
-                                <span className="small fw-bold" style={{ minWidth: '35px' }}>{volume.speaker}%</span>
-                            </div>
-
                             <CButton
                                 size="sm"
                                 color="primary"
                                 onClick={testSpeaker}
                                 disabled={testing === 'speaker'}
                             >
-                                {testing === 'speaker' ? <CSpinner size="sm" /> : '🔊 Test'}
+                                {testing === 'speaker' ? <CSpinner size="sm" /> : '🔊 Test Speaker'}
                             </CButton>
                         </CCol>
 
@@ -320,30 +282,13 @@ const AudioTestCard = () => {
                                     </option>
                                 ))}
                             </select>
-
-                            {/* 볼륨 슬라이더 */}
-                            <div className="d-flex align-items-center gap-2 mb-2">
-                                <span className="small">Vol:</span>
-                                <input
-                                    type="range"
-                                    className="form-range flex-grow-1"
-                                    min="0"
-                                    max="100"
-                                    value={volume.microphone}
-                                    onChange={(e) => handleVolumeChange('microphone', parseInt(e.target.value))}
-                                    onMouseUp={() => applyVolume('microphone')}
-                                    onTouchEnd={() => applyVolume('microphone')}
-                                />
-                                <span className="small fw-bold" style={{ minWidth: '35px' }}>{volume.microphone}%</span>
-                            </div>
-
                             <CButton
                                 size="sm"
                                 color="info"
                                 onClick={testMicrophone}
                                 disabled={testing === 'microphone'}
                             >
-                                {testing === 'microphone' ? <CSpinner size="sm" /> : '🎤 Test'}
+                                {testing === 'microphone' ? <CSpinner size="sm" /> : '🎤 Test Microphone'}
                             </CButton>
                         </CCol>
                     </CRow>
@@ -354,7 +299,7 @@ const AudioTestCard = () => {
                         color={testResult.success ? 'success' : 'danger'}
                         className="mt-3 py-2"
                     >
-                        <strong>{testResult.type === 'speaker' ? '🔊' : '🎤'} Result:</strong>{' '}
+                        <strong>{testResult.type === 'speaker' ? '🔊' : '🎤'} Test Result:</strong>{' '}
                         {testResult.success
                             ? (testResult.message || 'Success!')
                             : `Failed: ${testResult.error}`
