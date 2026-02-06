@@ -103,35 +103,64 @@ class RosSubscriberNode(Node):
     
     def _msg_to_dict(self, msg) -> Dict[str, Any]:
         """ROS 메시지를 딕셔너리로 변환"""
+        import array
         result = {}
         
-        # 일반적인 필드 변환
-        for field in msg.get_fields_and_field_types().keys():
-            value = getattr(msg, field)
-            
-            # 기본 타입
-            if isinstance(value, (bool, int, float, str)):
-                result[field] = value
-            # 리스트
-            elif isinstance(value, (list, tuple)):
-                if len(value) > 100:  # 큰 배열은 요약
-                    result[field] = {"length": len(value), "sample": list(value[:5])}
-                else:
-                    result[field] = list(value)
-            # 배열 타입 (numpy 등)
-            elif hasattr(value, 'tolist'):
-                arr = value.tolist()
-                if len(arr) > 100:
-                    result[field] = {"length": len(arr), "sample": arr[:5]}
-                else:
-                    result[field] = arr
-            # 중첩 메시지
-            elif hasattr(value, 'get_fields_and_field_types'):
-                result[field] = self._msg_to_dict(value)
-            else:
-                result[field] = str(value)
+        try:
+            # 일반적인 필드 변환
+            for field in msg.get_fields_and_field_types().keys():
+                try:
+                    value = getattr(msg, field)
+                    result[field] = self._value_to_dict(value)
+                except Exception as e:
+                    result[field] = f"<error: {str(e)}>"
+        except Exception as e:
+            return {"_error": str(e)}
         
         return result
+    
+    def _value_to_dict(self, value) -> Any:
+        """값을 JSON 직렬화 가능한 형태로 변환"""
+        import array
+        
+        # None
+        if value is None:
+            return None
+        
+        # 기본 타입
+        if isinstance(value, (bool, int, float, str)):
+            return value
+        
+        # array.array 타입 (ROS2 quaternion, translation 등)
+        if isinstance(value, array.array):
+            return list(value)
+        
+        # bytes 타입
+        if isinstance(value, bytes):
+            return f"<bytes len={len(value)}>"
+        
+        # 리스트/튜플
+        if isinstance(value, (list, tuple)):
+            if len(value) > 100:  # 큰 배열은 요약
+                sample = [self._value_to_dict(item) for item in value[:5]]
+                return {"length": len(value), "sample": sample}
+            else:
+                return [self._value_to_dict(item) for item in value]
+        
+        # numpy 배열 등 (tolist 메서드가 있는 타입)
+        if hasattr(value, 'tolist'):
+            arr = value.tolist()
+            if len(arr) > 100:
+                return {"length": len(arr), "sample": arr[:5]}
+            else:
+                return arr
+        
+        # ROS 메시지 (중첩 메시지)
+        if hasattr(value, 'get_fields_and_field_types'):
+            return self._msg_to_dict(value)
+        
+        # 그 외 타입은 문자열로 변환
+        return str(value)
 
 
 class RosService:

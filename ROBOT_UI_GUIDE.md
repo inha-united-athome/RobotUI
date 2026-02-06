@@ -50,6 +50,9 @@ cp .env.example .env
 
 # Python 의존성 설치
 pip install -r requirements.txt
+
+# vite 등 설치  : package.json에 있는거
+npm install
 ```
 
 ### 2. Frontend 빌드
