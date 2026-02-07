@@ -190,6 +190,23 @@ const AudioTestCard = () => {
             const res = await fetch(`${API_BASE}/api/sensors/audio/list`)
             const data = await res.json()
             setAudioDevices(data)
+
+            // 첫 번째 장치를 자동 선택 (볼륨 동기화를 위해)
+            if (data.speakers?.length > 0 && selectedSpeaker === 'default') {
+                setSelectedSpeaker(data.speakers[0].id)
+            }
+            if (data.microphones?.length > 0 && selectedMic === 'default') {
+                setSelectedMic(data.microphones[0].id)
+            }
+
+            // 현재 볼륨 가져오기 (alsamixer와 동기화)
+            try {
+                const volRes = await fetch(`${API_BASE}/api/sensors/audio/volume`)
+                const volData = await volRes.json()
+                setVolume(volData)
+            } catch (volErr) {
+                console.error('Failed to get volume:', volErr)
+            }
         } catch (e) {
             console.error(e)
         }

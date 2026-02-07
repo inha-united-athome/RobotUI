@@ -328,23 +328,41 @@ class SensorCheckService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _test_sync)
     
-    async def test_microphone(self, device_id: str = "default", duration: float = 2.0) -> Dict:
+    async def test_microphone(self, device_id: str = "default", speaker_id: str = "default", duration: float = 3.0) -> Dict:
         """
-        마이크 테스트 (녹음 후 레벨 확인) - PC2에서 SSH로 실행
-        
-        Args:
-            device_id: ALSA 장치 ID
-            duration: 녹음 시간 (초)
+        마이크 테스트 (녹음 후 재생)
+        호환성을 위해 hw: 대신 plughw: 사용 시도
         """
         def _test_sync():
             try:
-                # PC2에서 arecord로 녹음 테스트
-                cmd = f"arecord -D {device_id} -d {int(duration)} -f cd /tmp/mic_test.wav 2>&1 && ls -la /tmp/mic_test.wav && rm -f /tmp/mic_test.wav"
-                stdout, stderr = self._run_remote_command(cmd, timeout=int(duration) + 5)
-                if "mic_test.wav" in stdout:
-                    return {"success": True, "device": device_id, "message": "Recording completed"}
-                else:
-                    return {"success": False, "device": device_id, "error": stderr or "Recording failed"}
+                # 장치 ID 변환 (hw: -> plughw: 로 변경하여 포맷 호환성 확보)
+                rec_device = device_id.replace("hw:", "plughw:") if "hw:" in device_id else device_id
+                play_device = speaker_id.replace("hw:", "plughw:") if "hw:" in speaker_id else speaker_id
+                
+                # 0. 기존 파일 삭제
+                self._run_remote_command("rm -f /tmp/mic_test.wav")
+                
+                # 1. 녹음 (arecord) - 포맷을 명시적으로 지정 (CD quality)
+                # ReSpeaker 등의 멀티채널 마이크 호환성을 위해 plug 플러그인 사용이 중요
+                rec_cmd = f"arecord -D {rec_device} -d {int(duration)} -f cd /tmp/mic_test.wav"
+                stdout, stderr = self._run_remote_command(rec_cmd, timeout=int(duration) + 5)
+                
+                # 녹음 파일 확인
+                check_out, _ = self._run_remote_command("ls -l /tmp/mic_test.wav")
+                if "No such file" in check_out or not check_out:
+                     # 녹음 실패 시 모노/16k로 재시도 (fallback)
+                     rec_cmd_fallback = f"arecord -D {rec_device} -d {int(duration)} -f S16_LE -r 16000 -c 1 /tmp/mic_test.wav"
+                     self._run_remote_command(rec_cmd_fallback, timeout=int(duration) + 5)
+                
+                # 2. 재생 (aplay)
+                play_cmd = f"aplay -D {play_device} /tmp/mic_test.wav"
+                stdout, stderr = self._run_remote_command(play_cmd, timeout=int(duration) + 5)
+                
+                # 3. 파일 삭제
+                self._run_remote_command("rm -f /tmp/mic_test.wav")
+                
+                return {"success": True, "device": device_id, "message": "Recorded & Played back"}
+                     
             except Exception as e:
                 return {"success": False, "device": device_id, "error": str(e)}
         
