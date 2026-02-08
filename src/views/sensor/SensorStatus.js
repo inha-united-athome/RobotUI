@@ -26,51 +26,9 @@ import {
     cilGlobeAlt,
     cilReload,
 } from '@coreui/icons'
-import { useSensorsStatus, useRosTopics, pingHost } from '../../hooks/useApi'
+import { useSensorsStatus, pingHost } from '../../hooks/useApi'
 
-// ROS 토픽 기반 센서 목록
-const ROS_SENSORS = [
-    { name: 'RGB Camera', topic: '/camera/color/image_raw' },
-    { name: 'Depth Camera', topic: '/camera/depth/image_rect_raw' },
-    { name: '2D LiDAR', topic: '/scan' },
-    { name: '3D LiDAR', topic: '/points' },
-    { name: 'IMU', topic: '/imu/data' },
-    { name: 'Force Sensor L', topic: '/force_sensor/left' },
-    { name: 'Force Sensor R', topic: '/force_sensor/right' },
-]
 
-// ROS 토픽 센서 행
-const RosSensorRow = ({ sensor, topicsData }) => {
-    const topicData = topicsData?.[sensor.topic]
-    const isActive = topicData?.available ?? false
-
-    return (
-        <CTableRow>
-            <CTableDataCell>
-                <CIcon
-                    icon={isActive ? cilCheckCircle : cilXCircle}
-                    className={`text-${isActive ? 'success' : 'danger'} me-2`}
-                />
-                {sensor.name}
-            </CTableDataCell>
-            <CTableDataCell>
-                <code className="small">{sensor.topic}</code>
-            </CTableDataCell>
-            <CTableDataCell className="text-center">
-                <CBadge color={isActive ? 'success' : 'secondary'}>
-                    {isActive ? 'Active' : 'Inactive'}
-                </CBadge>
-            </CTableDataCell>
-            <CTableDataCell>
-                {topicData?.timestamp && (
-                    <small className="text-body-secondary">
-                        {new Date(topicData.timestamp).toLocaleTimeString()}
-                    </small>
-                )}
-            </CTableDataCell>
-        </CTableRow>
-    )
-}
 
 // API 기반 센서 상태 카드 (Raw 접근)
 const RawSensorStatusCard = () => {
@@ -452,8 +410,6 @@ const PingTestCard = () => {
 }
 
 const SensorStatus = () => {
-    const { data: topicsData } = useRosTopics(3000)
-
     return (
         <>
             <CRow>
@@ -468,30 +424,6 @@ const SensorStatus = () => {
 
             {/* 오디오 테스트 */}
             <AudioTestCard />
-
-            {/* ROS 토픽 기반 센서 상태 */}
-            <CCard className="mb-4">
-                <CCardHeader>
-                    <strong><CIcon icon={cilGlobeAlt} className="me-2" />ROS2 Topic Sensor Status</strong>
-                </CCardHeader>
-                <CCardBody>
-                    <CTable hover responsive>
-                        <CTableHead>
-                            <CTableRow>
-                                <CTableHeaderCell>Sensor</CTableHeaderCell>
-                                <CTableHeaderCell>Topic</CTableHeaderCell>
-                                <CTableHeaderCell className="text-center">Status</CTableHeaderCell>
-                                <CTableHeaderCell>Last Update</CTableHeaderCell>
-                            </CTableRow>
-                        </CTableHead>
-                        <CTableBody>
-                            {ROS_SENSORS.map((sensor) => (
-                                <RosSensorRow key={sensor.topic} sensor={sensor} topicsData={topicsData} />
-                            ))}
-                        </CTableBody>
-                    </CTable>
-                </CCardBody>
-            </CCard>
         </>
     )
 }

@@ -99,6 +99,20 @@ export const useRosStatus = (interval = 5000) => {
 }
 
 /**
+ * PC 네트워크 인터페이스 조회 훅 (bmon 스타일)
+ */
+export const usePCNetwork = (pcId, interval = 2000) => {
+    return useApiData(`/api/pc/${pcId}/network`, interval)
+}
+
+/**
+ * PTP 시간 동기화 상태 조회 훅
+ */
+export const useTimeSyncStatus = (interval = 5000) => {
+    return useApiData('/api/pc/time-sync/status', interval)
+}
+
+/**
  * 특정 ROS 토픽 데이터 조회 훅
  */
 export const useRosTopic = (topicPath, interval = 1000) => {

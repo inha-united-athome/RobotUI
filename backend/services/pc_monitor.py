@@ -285,3 +285,178 @@ print(json.dumps(processes[:{top_n}]))
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _get_sync)
 
+    async def get_tegrastats_power(self, pc_config: PCConfig, duration_sec: int = 3) -> Dict[str, Any]:
+        """
+        Jetson tegrastats로 전력 측정 (평균값)
+        
+        Args:
+            pc_config: PC 설정
+            duration_sec: 측정 시간 (초)
+        """
+        if not HAS_PARAMIKO:
+            return {"error": "paramiko required"}
+        
+        def _get_sync():
+            client = self._get_ssh_client(pc_config)
+            
+            # tegrastats를 duration_sec 동안 실행하고 전력 값 파싱
+            script = f'''
+timeout {duration_sec} tegrastats --interval 1000 2>/dev/null | python3 -c "
+import sys
+import re
+
+powers = []
+for line in sys.stdin:
+    # VDD_IN 또는 VDD_CPU_GPU_CV 패턴 찾기
+    # 예: VDD_IN 4500mW/4500mW
+    matches = re.findall(r'VDD_(?:IN|CPU_GPU_CV|SYS_SOC|SOC|GPU|CPU)\\s+(\\d+)mW', line)
+    if matches:
+        # 첫 번째 값(현재 전력)만 사용
+        powers.append(int(matches[0]))
+
+if powers:
+    import json
+    print(json.dumps({{
+        'avg_power_mw': sum(powers) / len(powers),
+        'min_power_mw': min(powers),
+        'max_power_mw': max(powers),
+        'samples': len(powers)
+    }}))
+else:
+    print('{{}}')
+"
+'''
+            stdin, stdout, stderr = client.exec_command(script, timeout=duration_sec + 5)
+            output = stdout.read().decode().strip()
+            
+            if output:
+                try:
+                    data = json.loads(output)
+                    # mW를 W로 변환
+                    if 'avg_power_mw' in data:
+                        data['avg_power_watts'] = round(data['avg_power_mw'] / 1000, 2)
+                        data['min_power_watts'] = round(data['min_power_mw'] / 1000, 2)
+                        data['max_power_watts'] = round(data['max_power_mw'] / 1000, 2)
+                    return data
+                except json.JSONDecodeError:
+                    return {"error": "Failed to parse tegrastats output"}
+            return {"error": "No tegrastats output"}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+
+    async def get_network_interfaces(self, pc_config: PCConfig, is_local: bool = False) -> Dict[str, Any]:
+        """
+        네트워크 인터페이스 목록 및 트래픽 요약 (bmon 스타일)
+        """
+        if is_local:
+            return await self._get_local_network()
+        else:
+            return await self._get_remote_network(pc_config)
+    
+    async def _get_local_network(self) -> Dict[str, Any]:
+        """로컬 네트워크 인터페이스 정보"""
+        def _get_sync():
+            import socket
+            
+            interfaces = []
+            net_io = psutil.net_io_counters(pernic=True)
+            net_if_addrs = psutil.net_if_addrs()
+            net_if_stats = psutil.net_if_stats()
+            
+            for iface, counters in net_io.items():
+                # lo (loopback) 제외
+                if iface == 'lo':
+                    continue
+                
+                stats = net_if_stats.get(iface)
+                addrs = net_if_addrs.get(iface, [])
+                
+                # IPv4 주소 찾기
+                ipv4 = None
+                for addr in addrs:
+                    if addr.family == socket.AF_INET:
+                        ipv4 = addr.address
+                        break
+                
+                interfaces.append({
+                    'name': iface,
+                    'is_up': stats.isup if stats else False,
+                    'speed_mbps': stats.speed if stats else 0,
+                    'mtu': stats.mtu if stats else 0,
+                    'ipv4': ipv4,
+                    'rx_bytes': counters.bytes_recv,
+                    'tx_bytes': counters.bytes_sent,
+                    'rx_packets': counters.packets_recv,
+                    'tx_packets': counters.packets_sent,
+                    'rx_errors': counters.errin,
+                    'tx_errors': counters.errout,
+                    'rx_drops': counters.dropin,
+                    'tx_drops': counters.dropout,
+                })
+            
+            return {'interfaces': interfaces, 'timestamp': datetime.now().isoformat()}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+    
+    async def _get_remote_network(self, pc_config: PCConfig) -> Dict[str, Any]:
+        """원격 PC 네트워크 인터페이스 정보 (SSH)"""
+        if not HAS_PARAMIKO:
+            return {"error": "paramiko required"}
+        
+        def _get_sync():
+            client = self._get_ssh_client(pc_config)
+            
+            script = '''
+python3 -c "
+import json
+import psutil
+import socket
+from datetime import datetime
+
+interfaces = []
+net_io = psutil.net_io_counters(pernic=True)
+net_if_addrs = psutil.net_if_addrs()
+net_if_stats = psutil.net_if_stats()
+
+for iface, counters in net_io.items():
+    if iface == 'lo':
+        continue
+    
+    stats = net_if_stats.get(iface)
+    addrs = net_if_addrs.get(iface, [])
+    
+    ipv4 = None
+    for addr in addrs:
+        if addr.family == socket.AF_INET:
+            ipv4 = addr.address
+            break
+    
+    interfaces.append({
+        'name': iface,
+        'is_up': stats.isup if stats else False,
+        'speed_mbps': stats.speed if stats else 0,
+        'mtu': stats.mtu if stats else 0,
+        'ipv4': ipv4,
+        'rx_bytes': counters.bytes_recv,
+        'tx_bytes': counters.bytes_sent,
+        'rx_packets': counters.packets_recv,
+        'tx_packets': counters.packets_sent,
+        'rx_errors': counters.errin,
+        'tx_errors': counters.errout,
+        'rx_drops': counters.dropin,
+        'tx_drops': counters.dropout,
+    })
+
+print(json.dumps({'interfaces': interfaces, 'timestamp': datetime.now().isoformat()}))
+"
+'''
+            stdin, stdout, stderr = client.exec_command(script, timeout=10)
+            output = stdout.read().decode().strip()
+            
+            return json.loads(output) if output else {"interfaces": []}
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_sync)
+
