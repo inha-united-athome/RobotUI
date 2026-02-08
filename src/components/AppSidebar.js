@@ -18,7 +18,7 @@ import navigation from '../_nav'
 // 로고 이미지 import (파일이 있으면 사용)
 let logoImage = null
 try {
-  logoImage = require('src/assets/brand/inha-united-logo.png')
+  logoImage = require('assets/brand/inha-united-logo.png')
 } catch (e) {
   // 로고 파일이 없으면 텍스트 로고 사용
 }
