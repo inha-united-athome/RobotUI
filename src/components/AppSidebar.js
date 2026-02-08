@@ -15,13 +15,8 @@ import { AppSidebarNav } from './AppSidebarNav'
 // sidebar nav config
 import navigation from '../_nav'
 
-// 로고 이미지 import (파일이 있으면 사용)
-let logoImage = null
-try {
-  logoImage = require('assets/brand/inha-united-logo.png')
-} catch (e) {
-  // 로고 파일이 없으면 텍스트 로고 사용
-}
+// 로고 이미지 import
+import logoImage from '../assets/brand/inha-united-logo.png'
 
 const AppSidebar = () => {
   const dispatch = useDispatch()
@@ -40,7 +35,7 @@ const AppSidebar = () => {
       }}
     >
       <CSidebarHeader className="border-bottom">
-        <CSidebarBrand to="/" className="d-flex align-items-center">
+        <CSidebarBrand to="/" className="d-flex align-items-center text-decoration-none">
           {logoImage ? (
             <>
               <img
