@@ -36,31 +36,23 @@ const AppSidebar = () => {
     >
       <CSidebarHeader className="border-bottom">
         <CSidebarBrand to="/" className="d-flex align-items-center text-decoration-none">
-          {logoImage ? (
-            <>
-              <img
-                src={logoImage}
-                alt="Inha-United"
-                height={32}
-                className="sidebar-brand-full"
-              />
-              <img
-                src={logoImage}
-                alt="IU"
-                height={32}
-                className="sidebar-brand-narrow"
-              />
-            </>
-          ) : (
-            <>
-              <span className="sidebar-brand-full fs-5 fw-bold text-white">
-                🤖 Inha-United
-              </span>
-              <span className="sidebar-brand-narrow fs-5 fw-bold text-white">
-                IU
-              </span>
-            </>
-          )}
+          {/* 펼쳐진 상태: 로고 + 텍스트 */}
+          <span className="sidebar-brand-full d-flex align-items-center">
+            <img
+              src={logoImage}
+              alt="Inha-United"
+              height={32}
+              className="me-2"
+            />
+            <span className="fs-5 fw-bold text-white">Inha-United</span>
+          </span>
+          {/* 접힌 상태: 로고만 */}
+          <img
+            src={logoImage}
+            alt="IU"
+            height={32}
+            className="sidebar-brand-narrow"
+          />
         </CSidebarBrand>
         <CCloseButton
           className="d-lg-none"
