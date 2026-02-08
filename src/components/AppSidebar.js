@@ -9,15 +9,19 @@ import {
   CSidebarHeader,
   CSidebarToggler,
 } from '@coreui/react'
-import CIcon from '@coreui/icons-react'
 
 import { AppSidebarNav } from './AppSidebarNav'
 
-import { logo } from 'src/assets/brand/logo'
-import { sygnet } from 'src/assets/brand/sygnet'
-
 // sidebar nav config
 import navigation from '../_nav'
+
+// 로고 이미지 import (파일이 있으면 사용)
+let logoImage = null
+try {
+  logoImage = require('src/assets/brand/inha-united-logo.png')
+} catch (e) {
+  // 로고 파일이 없으면 텍스트 로고 사용
+}
 
 const AppSidebar = () => {
   const dispatch = useDispatch()
@@ -36,9 +40,32 @@ const AppSidebar = () => {
       }}
     >
       <CSidebarHeader className="border-bottom">
-        <CSidebarBrand to="/">
-          <CIcon customClassName="sidebar-brand-full" icon={logo} height={32} />
-          <CIcon customClassName="sidebar-brand-narrow" icon={sygnet} height={32} />
+        <CSidebarBrand to="/" className="d-flex align-items-center">
+          {logoImage ? (
+            <>
+              <img
+                src={logoImage}
+                alt="Inha-United"
+                height={32}
+                className="sidebar-brand-full"
+              />
+              <img
+                src={logoImage}
+                alt="IU"
+                height={32}
+                className="sidebar-brand-narrow"
+              />
+            </>
+          ) : (
+            <>
+              <span className="sidebar-brand-full fs-5 fw-bold text-white">
+                🤖 Inha-United
+              </span>
+              <span className="sidebar-brand-narrow fs-5 fw-bold text-white">
+                IU
+              </span>
+            </>
+          )}
         </CSidebarBrand>
         <CCloseButton
           className="d-lg-none"
