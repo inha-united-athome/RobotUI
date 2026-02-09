@@ -124,7 +124,7 @@ if is_jetson:
             last_line = lines[-1] if lines else ''
             
             # CPU 사용량 파싱: CPU [1%@972,0%@972,...]
-            cpu_match = re.search(r'CPU \\\\[([^\\\\]]+)\\\\]', last_line)
+            cpu_match = re.search(r'CPU \\[([^\\]]+)\\]', last_line)
             if cpu_match:
                 cpu_vals = re.findall(r'([0-9]+)%@', cpu_match.group(1))
                 if cpu_vals:
