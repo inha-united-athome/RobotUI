@@ -43,7 +43,7 @@ class AppConfig(BaseModel):
     # PC 설정 (PC1은 로컬이므로 설정 불필요, PC2만 설정)
     pcs: Dict[str, PCConfig] = {
         "pc2": PCConfig(
-            ip=os.getenv("PC2_IP", "192.168.1.11"),
+            ip=os.getenv("PC2_IP", "192.168.78.11"),
             username=os.getenv("PC2_USER", "robot"),
             password=os.getenv("PC2_PASSWORD"),
             ssh_key_path=os.getenv("PC2_SSH_KEY"),
@@ -54,8 +54,8 @@ class AppConfig(BaseModel):
     sensors: List[SensorConfig] = [
         # LiDAR (2D 2개, 3D 1개)
         SensorConfig(name="2D LiDAR #1", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP_1", os.getenv("LIDAR_2D_IP", "192.168.30.10"))),
-        SensorConfig(name="2D LiDAR #2", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP_2", "192.168.30.12")),
-        SensorConfig(name="3D LiDAR", type="lidar_3d", ip=os.getenv("LIDAR_3D_IP", "192.168.30.11")),
+        SensorConfig(name="2D LiDAR #2", type="lidar_2d", ip=os.getenv("LIDAR_2D_IP_2", "192.168.30.11")),
+        SensorConfig(name="3D LiDAR", type="lidar_3d", ip=os.getenv("LIDAR_3D_IP", "192.168.78.110")),
         # Audio
         SensorConfig(name="Speaker", type="audio_output"),
         SensorConfig(name="Microphone", type="audio_input"),

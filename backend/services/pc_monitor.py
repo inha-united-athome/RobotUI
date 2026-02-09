@@ -120,30 +120,30 @@ if is_jetson:
         
         if tegra_out:
             # 마지막 라인 사용
-            last_line = tegra_out.strip().split('\\n')[-1]
+            last_line = tegra_out.strip().split('\n')[-1]
             
             # CPU 사용량 파싱: CPU [1%@972,0%@972,...]
-            cpu_match = re.search(r'CPU \\[([^\\]]+)\\]', last_line)
+            cpu_match = re.search(r'CPU \[([^\]]+)\]', last_line)
             if cpu_match:
-                cpu_vals = re.findall(r'(\\d+)%@', cpu_match.group(1))
+                cpu_vals = re.findall(r'(\d+)%@', cpu_match.group(1))
                 if cpu_vals:
                     result['cpu_percent'] = sum(int(v) for v in cpu_vals) / len(cpu_vals)
             
             # GPU 사용량: GR3D 또는 GPU 패턴
-            gpu_match = re.search(r'(?:GR3D|GPU)\\s*(?:FREQ)?\\s*(\\d+)%', last_line)
+            gpu_match = re.search(r'(?:GR3D|GPU)\s*(?:FREQ)?\s*(\d+)%', last_line)
             if gpu_match:
                 result['gpu_percent'] = float(gpu_match.group(1))
             else:
                 result['gpu_percent'] = 0.0
             
             # VIN 전력 파싱 (총 시스템 전력): VIN 18082mW/9041mW (현재/평균)
-            vin_match = re.search(r'VIN\\s+(\\d+)mW/(\\d+)mW', last_line)
+            vin_match = re.search(r'VIN\s+(\d+)mW/(\d+)mW', last_line)
             if vin_match:
                 result['power_watts'] = round(int(vin_match.group(1)) / 1000.0, 1)
                 result['power_avg_watts'] = round(int(vin_match.group(2)) / 1000.0, 1)
             else:
                 # VDD_IN 패턴 시도
-                vdd_match = re.search(r'VDD_IN\\s+(\\d+)mW', last_line)
+                vdd_match = re.search(r'VDD_IN\s+(\d+)mW', last_line)
                 if vdd_match:
                     result['power_watts'] = round(int(vdd_match.group(1)) / 1000.0, 1)
     except Exception as e:
@@ -353,13 +353,13 @@ avg_powers = []
 
 for line in sys.stdin:
     # VIN 패턴 찾기 (총 시스템 전력): VIN 18082mW/9041mW
-    vin_match = re.search(r'VIN\\s+(\\d+)mW/(\\d+)mW', line)
+    vin_match = re.search(r'VIN\s+(\d+)mW/(\d+)mW', line)
     if vin_match:
         current_powers.append(int(vin_match.group(1)))
         avg_powers.append(int(vin_match.group(2)))
     else:
         # 폴백: VDD_IN 또는 다른 전력 패턴
-        matches = re.findall(r'VDD_(?:IN|CPU_GPU_CV|SYS_SOC|SOC)\\s+(\\d+)mW', line)
+        matches = re.findall(r'VDD_(?:IN|CPU_GPU_CV|SYS_SOC|SOC)\s+(\d+)mW', line)
         if matches:
             current_powers.append(int(matches[0]))
 
