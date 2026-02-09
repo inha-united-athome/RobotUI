@@ -41,6 +41,8 @@ class PCMonitorService:
     async def _get_local_status(self) -> Dict[str, Any]:
         """로컬 PC 상태 조회 (psutil 직접 사용)"""
         def _get_sync():
+            import os
+            import re
             result = {}
             
             # CPU
@@ -52,23 +54,69 @@ class PCMonitorService:
             result['memory_used_gb'] = round(mem.used / (1024**3), 2)
             result['memory_total_gb'] = round(mem.total / (1024**3), 2)
             
-            # GPU (nvidia-smi)
-            try:
-                gpu_output = subprocess.check_output([
-                    'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,power.draw,temperature.gpu',
-                    '--format=csv,noheader,nounits'
-                ], timeout=3).decode().strip().split(',')
-                result['gpu_percent'] = float(gpu_output[0].strip())
-                result['gpu_memory_used_mb'] = int(gpu_output[1].strip())
-                result['gpu_memory_total_mb'] = int(gpu_output[2].strip())
-                result['power_watts'] = float(gpu_output[3].strip())
-                result['temperature'] = float(gpu_output[4].strip())
-            except Exception:
-                result['gpu_percent'] = 0
-                result['gpu_memory_used_mb'] = 0
-                result['gpu_memory_total_mb'] = 0
-                result['power_watts'] = 0
-                result['temperature'] = 0
+            # Jetson 여부 확인
+            is_jetson = os.path.exists('/usr/bin/tegrastats')
+            
+            if is_jetson:
+                # Jetson: tegrastats 사용
+                try:
+                    proc = subprocess.run(
+                        ['timeout', '1', 'tegrastats', '--interval', '500'],
+                        capture_output=True, timeout=3
+                    )
+                    tegra_out = proc.stdout.decode().strip()
+                    
+                    if tegra_out:
+                        lines = tegra_out.strip().split('\n')
+                        last_line = lines[-1] if lines else ''
+                        
+                        # GPU 사용량: GR3D_FREQ 0%
+                        gpu_match = re.search(r'GR3D_FREQ\s+(\d+)%', last_line)
+                        if gpu_match:
+                            result['gpu_percent'] = float(gpu_match.group(1))
+                        else:
+                            result['gpu_percent'] = 0.0
+                        
+                        # 온도: cpu@35.343C
+                        temp_match = re.search(r'cpu@([\d.]+)C', last_line)
+                        if temp_match:
+                            result['temperature'] = float(temp_match.group(1))
+                        else:
+                            result['temperature'] = 0.0
+                        
+                        # 전력: VDD_GPU_SOC 또는 VIN_SYS_5V0 사용
+                        power_match = re.search(r'VDD_GPU_SOC\s+(\d+)mW', last_line)
+                        if power_match:
+                            result['power_watts'] = round(int(power_match.group(1)) / 1000.0, 1)
+                        else:
+                            vin_match = re.search(r'VIN_SYS_5V0\s+(\d+)mW', last_line)
+                            if vin_match:
+                                result['power_watts'] = round(int(vin_match.group(1)) / 1000.0, 1)
+                            else:
+                                result['power_watts'] = 0.0
+                except Exception as e:
+                    result['gpu_percent'] = 0
+                    result['power_watts'] = 0
+                    result['temperature'] = 0
+                    result['tegrastats_error'] = str(e)
+            else:
+                # 일반 PC: nvidia-smi 사용
+                try:
+                    gpu_output = subprocess.check_output([
+                        'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,power.draw,temperature.gpu',
+                        '--format=csv,noheader,nounits'
+                    ], timeout=3).decode().strip().split(',')
+                    result['gpu_percent'] = float(gpu_output[0].strip())
+                    result['gpu_memory_used_mb'] = int(gpu_output[1].strip())
+                    result['gpu_memory_total_mb'] = int(gpu_output[2].strip())
+                    result['power_watts'] = float(gpu_output[3].strip())
+                    result['temperature'] = float(gpu_output[4].strip())
+                except Exception:
+                    result['gpu_percent'] = 0
+                    result['gpu_memory_used_mb'] = 0
+                    result['gpu_memory_total_mb'] = 0
+                    result['power_watts'] = 0
+                    result['temperature'] = 0
             
             # Time
             result['pc_time'] = datetime.now().isoformat()
@@ -113,10 +161,12 @@ if is_jetson:
     # Jetson: tegrastats로 GPU/CPU/Power 한번에 파싱
     try:
         import re
-        tegra_out = subprocess.check_output(
+        # timeout 명령어는 exit code 124를 반환하므로 run() 사용
+        proc = subprocess.run(
             ['timeout', '1', 'tegrastats', '--interval', '500'],
-            timeout=3, stderr=subprocess.DEVNULL
-        ).decode().strip()
+            capture_output=True, timeout=3
+        )
+        tegra_out = proc.stdout.decode().strip()
         
         if tegra_out:
             # 마지막 라인 사용
@@ -283,28 +333,31 @@ print(json.dumps(result))
             client = self._get_ssh_client(pc_config)
             
             script = f'''
-python3 -c "
+python3 -c \"
 import json
 import psutil
 import time
 
-# CPU percent warmup - 첫 호출은 항상 0 반환하므로 먼저 호출
-for proc in psutil.process_iter(['cpu_percent']):
+# 프로세스 목록을 먼저 저장
+proc_list = list(psutil.process_iter(['pid', 'name', 'memory_percent', 'username']))
+
+# 첫 번째 호출 (baseline)
+for proc in proc_list:
     try:
         proc.cpu_percent()
     except:
         pass
 
-# 잠시 대기 후 실제 값 수집
 time.sleep(0.5)
 
+# 두 번째 호출 (실제 값)
 processes = []
-for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
+for proc in proc_list:
     try:
         pinfo = proc.info
         cpu_pct = proc.cpu_percent()
         mem_pct = pinfo['memory_percent']
-        if cpu_pct is not None and mem_pct is not None:
+        if cpu_pct is not None and mem_pct is not None and cpu_pct > 0:
             processes.append({{
                 'pid': pinfo['pid'],
                 'name': pinfo['name'],
@@ -317,7 +370,7 @@ for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent',
 
 processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
 print(json.dumps(processes[:{top_n}]))
-"
+\"
 '''
             stdin, stdout, stderr = client.exec_command(script, timeout=10)
             output = stdout.read().decode().strip()
