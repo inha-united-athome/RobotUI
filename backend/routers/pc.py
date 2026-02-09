@@ -28,6 +28,7 @@ class PCStatusResponse(BaseModel):
     gpu_memory_used_mb: Optional[int] = None
     gpu_memory_total_mb: Optional[int] = None
     power_watts: Optional[float] = None
+    power_avg_watts: Optional[float] = None  # Jetson: VIN average power
     temperature: Optional[float] = None
     pc_time: Optional[str] = None
     lan_time: str
@@ -83,6 +84,7 @@ async def get_pc_status(pc_id: str):
             gpu_memory_used_mb=status.get("gpu_memory_used_mb"),
             gpu_memory_total_mb=status.get("gpu_memory_total_mb"),
             power_watts=status.get("power_watts"),
+            power_avg_watts=status.get("power_avg_watts"),
             temperature=status.get("temperature"),
             pc_time=status.get("pc_time"),
             lan_time=lan_time.isoformat(),

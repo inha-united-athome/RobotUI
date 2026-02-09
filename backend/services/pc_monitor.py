@@ -106,15 +106,51 @@ result['memory_used_gb'] = round(mem.used / (1024**3), 2)
 result['memory_total_gb'] = round(mem.total / (1024**3), 2)
 
 # Jetson의 경우 tegrastats 또는 nvidia-smi 대신 다른 방법 사용
-try:
-    # 먼저 tegrastats 확인 (Jetson용)
-    import os
-    if os.path.exists('/usr/bin/tegrastats'):
-        # Jetson에서는 GPU/CPU가 통합되어 있음, power/temp 조회
-        with open('/sys/devices/gpu.0/load', 'r') as f:
-            result['gpu_percent'] = int(f.read().strip()) / 10.0
-    else:
-        # 일반 NVIDIA GPU
+import os
+is_jetson = os.path.exists('/usr/bin/tegrastats')
+
+if is_jetson:
+    # Jetson: tegrastats로 GPU/CPU/Power 한번에 파싱
+    try:
+        import re
+        tegra_out = subprocess.check_output(
+            ['timeout', '1', 'tegrastats', '--interval', '500'],
+            timeout=3, stderr=subprocess.DEVNULL
+        ).decode().strip()
+        
+        if tegra_out:
+            # 마지막 라인 사용
+            last_line = tegra_out.strip().split('\\n')[-1]
+            
+            # CPU 사용량 파싱: CPU [1%@972,0%@972,...]
+            cpu_match = re.search(r'CPU \\[([^\\]]+)\\]', last_line)
+            if cpu_match:
+                cpu_vals = re.findall(r'(\\d+)%@', cpu_match.group(1))
+                if cpu_vals:
+                    result['cpu_percent'] = sum(int(v) for v in cpu_vals) / len(cpu_vals)
+            
+            # GPU 사용량: GR3D 또는 GPU 패턴
+            gpu_match = re.search(r'(?:GR3D|GPU)\\s*(?:FREQ)?\\s*(\\d+)%', last_line)
+            if gpu_match:
+                result['gpu_percent'] = float(gpu_match.group(1))
+            else:
+                result['gpu_percent'] = 0.0
+            
+            # VIN 전력 파싱 (총 시스템 전력): VIN 18082mW/9041mW (현재/평균)
+            vin_match = re.search(r'VIN\\s+(\\d+)mW/(\\d+)mW', last_line)
+            if vin_match:
+                result['power_watts'] = round(int(vin_match.group(1)) / 1000.0, 1)
+                result['power_avg_watts'] = round(int(vin_match.group(2)) / 1000.0, 1)
+            else:
+                # VDD_IN 패턴 시도
+                vdd_match = re.search(r'VDD_IN\\s+(\\d+)mW', last_line)
+                if vdd_match:
+                    result['power_watts'] = round(int(vdd_match.group(1)) / 1000.0, 1)
+    except Exception as e:
+        result['tegrastats_error'] = str(e)
+else:
+    # 일반 NVIDIA GPU
+    try:
         gpu_output = subprocess.check_output([
             'nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,power.draw,temperature.gpu',
             '--format=csv,noheader,nounits'
@@ -124,21 +160,13 @@ try:
         result['gpu_memory_total_mb'] = int(gpu_output[2].strip())
         result['power_watts'] = float(gpu_output[3].strip())
         result['temperature'] = float(gpu_output[4].strip())
-except Exception as e:
-    result['gpu_error'] = str(e)
+    except Exception as e:
+        result['gpu_error'] = str(e)
 
 # Temperature (thermal zone)
 try:
     with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
         result['temperature'] = round(int(f.read().strip()) / 1000.0, 1)
-except:
-    pass
-
-# Power (Jetson)
-try:
-    import subprocess
-    power_out = subprocess.check_output(['cat', '/sys/bus/i2c/drivers/ina3221x/1-0040/iio:device0/in_power0_input'], timeout=2)
-    result['power_watts'] = round(int(power_out.strip()) / 1000.0, 1)
 except:
     pass
 
@@ -257,17 +285,30 @@ print(json.dumps(result))
 python3 -c "
 import json
 import psutil
+import time
+
+# CPU percent warmup - 첫 호출은 항상 0 반환하므로 먼저 호출
+for proc in psutil.process_iter(['cpu_percent']):
+    try:
+        proc.cpu_percent()
+    except:
+        pass
+
+# 잠시 대기 후 실제 값 수집
+time.sleep(0.5)
 
 processes = []
 for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
     try:
         pinfo = proc.info
-        if pinfo['cpu_percent'] is not None and pinfo['memory_percent'] is not None:
+        cpu_pct = proc.cpu_percent()
+        mem_pct = pinfo['memory_percent']
+        if cpu_pct is not None and mem_pct is not None:
             processes.append({{
                 'pid': pinfo['pid'],
                 'name': pinfo['name'],
-                'cpu_percent': round(pinfo['cpu_percent'], 1),
-                'memory_percent': round(pinfo['memory_percent'], 1),
+                'cpu_percent': round(cpu_pct, 1),
+                'memory_percent': round(mem_pct, 1),
                 'user': pinfo['username'] or 'N/A',
             }})
     except:
@@ -300,28 +341,40 @@ print(json.dumps(processes[:{top_n}]))
             client = self._get_ssh_client(pc_config)
             
             # tegrastats를 duration_sec 동안 실행하고 전력 값 파싱
+            # VIN 패턴: 'VIN 18082mW/9041mW' (현재값/평균값)
             script = f'''
 timeout {duration_sec} tegrastats --interval 1000 2>/dev/null | python3 -c "
 import sys
 import re
+import json
 
-powers = []
+current_powers = []
+avg_powers = []
+
 for line in sys.stdin:
-    # VDD_IN 또는 VDD_CPU_GPU_CV 패턴 찾기
-    # 예: VDD_IN 4500mW/4500mW
-    matches = re.findall(r'VDD_(?:IN|CPU_GPU_CV|SYS_SOC|SOC|GPU|CPU)\\s+(\\d+)mW', line)
-    if matches:
-        # 첫 번째 값(현재 전력)만 사용
-        powers.append(int(matches[0]))
+    # VIN 패턴 찾기 (총 시스템 전력): VIN 18082mW/9041mW
+    vin_match = re.search(r'VIN\\s+(\\d+)mW/(\\d+)mW', line)
+    if vin_match:
+        current_powers.append(int(vin_match.group(1)))
+        avg_powers.append(int(vin_match.group(2)))
+    else:
+        # 폴백: VDD_IN 또는 다른 전력 패턴
+        matches = re.findall(r'VDD_(?:IN|CPU_GPU_CV|SYS_SOC|SOC)\\s+(\\d+)mW', line)
+        if matches:
+            current_powers.append(int(matches[0]))
 
-if powers:
-    import json
-    print(json.dumps({{
-        'avg_power_mw': sum(powers) / len(powers),
-        'min_power_mw': min(powers),
-        'max_power_mw': max(powers),
-        'samples': len(powers)
-    }}))
+if current_powers:
+    result = {{
+        'current_power_mw': current_powers[-1],
+        'avg_power_mw': sum(current_powers) / len(current_powers),
+        'min_power_mw': min(current_powers),
+        'max_power_mw': max(current_powers),
+        'samples': len(current_powers)
+    }}
+    # VIN 형식에서 평균값도 있으면 추가
+    if avg_powers:
+        result['system_avg_power_mw'] = avg_powers[-1]
+    print(json.dumps(result))
 else:
     print('{{}}')
 "
